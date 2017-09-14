@@ -1,0 +1,369 @@
+---
+title: "Statistical Methods for Discrete Response, Time Series, and Panel Data (W271): Lab 2"
+author: "Phat Doan, Ted Pham"
+date: "June 22, 2017"
+output: pdf_document
+---
+
+# The Lab:
+The purpose of this lab is to practice using Poission Regression models, conduct residual diagnostics, and examine goodness of fit. 
+
+# Data
+Agresti (2007) provides data on the social behavior of horseshoe crabs. These data are contained in the HorseshoeCrabs.csv file available on our website. Each observation corresponds to one female crab. The response variable is Sat, the number of "satellite" males in her vicinity. Physical measurements of the female-Color (4-level ordinal),
+Spine (3-level ordinal), Width (cm), and Weight (kg)-are explanatory variables. 
+
+```{r}
+suppressMessages(library(car))
+suppressMessages(library(Hmisc))
+```
+
+
+``` {r}
+df = read.csv("HorseshoeCrabs.csv")
+```
+
+# Exploratory Data Analysis
+
+## Summary of Descriptive Statistical Analysis
+```{r}
+describe(df)
+```
+- There are 173 observations, each corresponding to a horseshoe crab and its characteristics. In total 5 variables are available:
+    - Color : Physical measurements of the female-Color (4-level ordinal)
+    - Spine : 3-level ordinal
+    - Width : in cm
+    - Weight : in kg
+    - Sat : the number of "satellite" males in her vicinity
+
+  - There are no missing values for all records and variables.
+  
+  - We are interested in predicting number of satellite males in a female crab vicinity with poisson regression models. 
+  
+    - The response variable is "Sat" to indicate number of satellite males in.
+  
+    - The explanatory variable can be "Color", "Spine", "Width", and "Weight".
+    
+## Univariate Analysis
+
+### Response Variable: Sat
+```{r}
+#sort(df$Sat)
+
+hist(df$Sat, breaks = 0:16 - 0.5
+    ,xlim = range(0:16)
+    ,ylim = c(0, 70)
+    ,col = "lightseagreen"
+    ,xaxt = "n" #remove default x axis marker
+    ,main = "Distribution of Males around Female"
+    ,xlab = "# of "satellite" males in her vicinity"
+    )
+
+abline(v = mean(df$Sat), col = "green")
+abline(v = median(df$Sat), col = "navy")
+
+#add marker for x axis to be interger only
+axis(1, at = 0:16)
+
+legend("topright", c("Mean", "Median"), col = c("green", "navy"), pch = "|")
+
+
+```
+
+
+### Response Variable: Color
+    
+```{r}
+#summary(df$Color)
+
+#sort(df$Color)
+
+hist(df$Color, breaks = 0:5 - 0.5
+    ,xlim = range(1:4)
+    ,ylim = range(0:100)
+    ,col = "lightseagreen"
+    ,xaxt = "n" #remove x lab
+    ,main = "Distribution of Female-Color"
+    ,xlab = "Physical measurements of the female-Color (Ordinal)"
+    )
+
+abline(v = mean(df$Color), col = "gray")
+abline(v = median(df$Color), col = "navy")
+
+#add x lab to only contain 1 to 4
+axis(1, at = 0:5)
+
+legend("topright", c("Mean", "Median"), col = c("gray", "navy"), pch = "|")
+```
+
+### Response Variable: Spine
+```{r}
+describe(df$Spine)
+
+hist(df$Spine, breaks = 0:4 - 0.5
+    ,xlim = range(1:3)
+    ,ylim = range(0:120)
+    ,col = "lightseagreen"
+    ,xaxt = "n" #remove x lab
+    ,main = "Distribution of Spine Variable"
+    ,xlab = "Female-spine (Ordinal)"
+    )
+
+abline(v = mean(df$Spine), col = "gray")
+abline(v = median(df$Spine), col = "navy")
+
+#add x lab to only contain 1 to 4
+axis(1, at = 0:4)
+
+legend("topleft", c("Mean", "Median"), col = c("gray", "navy"), pch = "|")
+```
+
+### Response Variable: Width
+```{r}
+describe(df$Width)
+
+hist(df$Width
+     ,breaks = 20
+     ,xlim = range(20:34)
+     ,ylim = range(0:25)
+     ,col = "lightseagreen"
+     ,main = "Distribution of Female Crab Width"
+     ,xlab = "Female Crabs Width (cm)")
+
+abline(v = mean(df$Width), col = "gray")
+abline(v = median(df$Width), col = "navy")
+
+legend("topleft", c("Mean", "Median"), col = c("gray", "navy"), pch = "|")
+```
+
+
+### Response Variable: Weight
+```{r}
+describe(df$Weight)
+
+hist(df$Weight
+     ,xlim = range(1:6)
+     ,ylim = range(0:50)
+     ,col = "lightseagreen"
+     ,main = "Distribution of Female Crab Weight"
+     ,xlab = "Female Crab Weight (kg)"
+     ,breaks = 12)
+
+abline(v = mean(df$Weight), col = "gray")
+abline(v = median(df$Weight), col = "navy")
+
+legend("topright", c("Mean", "Median"), col = c("gray", "navy"), pch = "|")
+```
+
+
+## Bivariate Analysis
+
+### Scattetplot Matrix to determine relationships for further exploration
+
+```{r}
+suppressWarnings(scatterplotMatrix(df))
+```
+
+### Weight & Width
+```{r}
+plot(df$Weight
+     ,df$Width
+     ,col = "lightseagreen"
+     ,main = "Relationship between Female Crab Width and Weight"
+     ,xlab = "Weight (kg)"
+     ,ylab = "Width (cm)")
+
+abline(lm(df$Width ~ df$Weight), col = "gray")
+legend("topright", c("Regression Line")
+       , col = c("gray"), lty = c("dotted"))
+```
+
+
+### Color & Width
+```{r}
+par(mfrow = c(1, 2))
+boxplot(df$Width ~ df$Color
+        ,col = "lightseagreen"
+        ,main = "Color vs Width"
+        ,xlab = "Color (Ordinal)"
+        ,ylab = "Width (cm)")
+abline(h = mean(df$Width), col = "darkmagenta")
+abline(h = median(df$Width), col = "navy")
+
+
+boxplot(df$Weight ~ df$Color
+        ,col = "lightblue"
+        ,main = "Color vs Weight"
+        ,xlab = "Color (Ordinal)"
+        ,ylab = "Weight (kg)")
+
+abline(h = mean(df$Weight), col = "darkmagenta")
+abline(h = median(df$Weight), col = "navy")
+
+legend("topright", c("Mean", "Median")
+       , col = c("darkmagenta","navy"), lty = c("solid"))
+
+```
+
+
+### Spine: Weight & Width
+```{r}
+par(mfrow = c(1, 2))
+boxplot(df$Weight ~ df$Spine        
+        ,col = "lightseagreen"
+        ,main = "Spine vs Weight"
+        ,xlab = "Spine (Ordinal)"
+        ,ylab = "Weight (kg)")
+
+abline(h = mean(df$Weight), col = "darkmagenta")
+abline(h = median(df$Weight), col = "navy")
+
+
+boxplot(df$Width ~ df$Spine
+        ,col = "lightblue"
+        ,main = "Spine vs Width"
+        ,xlab = "Spine (Ordinal)"
+        ,ylab = "Width (cm)")
+
+abline(h = mean(df$Width), col = "darkmagenta")
+abline(h = median(df$Width), col = "navy")
+
+legend("topright", c("Mean", "Median")
+       , col = c("darkmagenta","navy"), lty = c("solid"))
+```
+
+### Sat: All
+```{r}
+par(mfrow = c(2, 2))
+boxplot(df$Color ~ df$Sat
+        ,ylim = range(0:4))
+boxplot(df$Spine ~ df$Sat)
+boxplot(df$Width ~ df$Sat)
+boxplot(df$Weight ~ df$Sat)
+```
+
+## Multivariate analysis
+### Width and Weight: Color
+```{r}
+plot(df$Width, df$Weight
+     ,main = "Female Crab Color by Weight and Width"
+     ,pch = ifelse(df$Color == 1
+                ,1
+                ,ifelse(df$Color == 2
+                        ,2
+                        ,ifelse(df$Color == 3
+                        ,3 ,4)))
+     ,ylab = "Weight (kg)"
+     ,xlab = "Width (cm)"
+     ,col = ifelse(df$Color == 1
+                ,"navy"
+                ,ifelse(df$Color == 2
+                        ,"gray"
+                        ,ifelse(df$Color == 3
+                        ,"darkmagenta", "darkorange2"))),
+     panel.first = grid(col = "gray", lty = "dotted"))
+
+legend("topleft", legend = c("4","3","2","1")
+       ,col = c("darkorange2", "darkmagenta", "gray","navy")
+       ,pch = c(4,3,2,1) 
+       ,box.col = "gray"
+       ,cex=.8
+       ,title = "Female Crab Color")
+```
+
+### Width and Weight: Spine
+```{r}
+plot(df$Width, df$Weight
+     ,main = "Female Crab Spine by Weight and Width"
+     ,pch = ifelse(df$Spine == 1
+                ,1
+                ,ifelse(df$Spine == 2
+                        ,2
+                        ,3))
+     ,ylab = "Weight (kg)"
+     ,xlab = "Width (cm)"
+     ,col = ifelse(df$Spine == 1
+                ,"navy"
+                ,ifelse(df$Spine == 2
+                        ,"darkmagenta"
+                        ,"darkorange2"))
+     ,panel.first = grid(col = "gray", lty = "dotted"))
+
+legend("topleft", legend = c("3","2","1")
+       ,col = c("darkorange2", "darkmagenta", "navy")
+       ,pch = c(3,2,1) 
+       ,box.col = "gray"
+       ,cex=.8
+       ,title = "Female Crab Color")
+```
+
+# Questions:
+## 23.
+### (a) Fit a Poisson regression model with a log link using all four explanatory variables in a linear form. Test their significance and summarize results.
+
+### (b) Compute deviance/df and interpret its value.
+
+### (c) Examine residual diagnostics and identify any potential problems with the model.
+
+### (d) Carry out the GOF test described on page 296 using the PostFitGOFTest() function available in the PostFitGOFTest.R program of the same name from our website. Use the default number of groups. (M/5 when M 100)
+
+#### i. State the hypotheses, test statistic and p-value, and interpret the results.
+
+####ii. Plot the Pearson residuals for the groups against the interval centers (available in the pear.res and centers components, respectively, of the list returned by the function). Use this plot and the residual plots from part (c) to explain the result
+
+## 24. Conduct an influence analysis. Interpret the results.
+
+## 25. Notice that there is one crab with a weight that is substantially different from the rest. This can be seen, for example, in a histogram of the weights. Remove this crab from the data and repeat the steps from Exercise 23. Has this fixed any problems with the model? Are there any other problems with the model, and what could be done to solve these problems?
+
+
+# Instructions:
+
+*  **Due Date: 7/2/2017 (11:59 p.m. PST, Sunday)**
+
+* Submission:
+    * Submit your own assignment via ISVC
+    
+    * Submit 2 files:
+        1. A pdf file including the summary, the details of your analysis, and all the R codes used to produce the analysis. Please do not suppress the codes in your pdf file.
+        2. R markdown file used to produce the pdf file
+
+    * Each group only needs to submit one set of files
+
+    * Use the following file naming convensation; fail to do so will receive 10% reduction in the grade:
+        * SectionNumber_hw01_FirstNameLastNameFirstInitial.fileExtension
+        * For example, if you are in Section 1 and have two students named John Smith and Jane Doe, you should name your file the following
+            * Section1_hw01_JohnS_JaneD.Rmd
+            * Section1_hw01_JohnS_JaneD.pdf
+
+    * Although it sounds obvious, please write the name of each members of your group on page 1 of your report.
+
+    * This lab can be completed in a group of up to 3 people. Each group only needs to make one submission. Although you can work by yourself, we encourage you to work in a group.
+
+    * When working in a group, do not use the "division-of-labor" approach to complete the lab. That is, do not divide the lab by having Student 1 completed questions 1 - 3, Student 2 completed questions 4 - 6, etc. Asking your teammate to do the questions for you takes away your own opportunity to learn.
+
+* Other general guidelines:
+    * Please read the instructions carefully.
+    
+    * Please read the questions carefully.
+
+    * Use only techniques and R libraries that are covered in this course.
+    
+    * If you use R libraries and/or functions to conduct hypothesis tests not covered in this course, you will have to explain why the function you use is appropriate for the hypothesis you are asked to test
+    
+    * Thoroughly analyze the given dataset. Detect any anomalies, including missing values, potential of top and/or bottom code, etc, in each of the variables.
+    
+    * Your report needs to include a comprehensive Exploratory Data Analysis (EDA) analysis, which includes both graphical and tabular analysis, as taught in this course.
+    
+    * Your analysis needs to be accompanied by detailed narrative. Remember, make sure your that when your audience (in this case, the professors and your classmates) can easily understand your your main conclusion and follow your the logic of your analysis. Note that just printing a bunch of graphs and model results, which we call "output dump", will likely receive a very low score.
+    
+    * Your rationale of any decisions made in your modeling needs to be explained and supported with empirical evidence. Remember to use the insights generated from your EDA step to guide your modeling step, as we discussed in live sessions.
+    
+    * All the steps to arrive at your final model need to be shown and explained very clearly.
+
+*  Students are expected to act with regards to UC Berkeley Academic Integrity.
+
+******************************************************
+
+
+
+
+

@@ -1,0 +1,163 @@
+---
+title: 'Statistical Methods for Discrete Response, Time Series, and Panel Data: Lab3'
+author: "Phat Doan, Ted Pham, Jayashree Raman"
+date: "7/21/2017"
+output: html_document
+---
+```{r}
+library(Hmisc)
+library(forecast)
+
+# Set working directory, change to appropriate 
+path <- "/Users/tedpham/Documents/W271 Time Series/HWs and Labs/Lab3"
+setwd(path)
+df <- read.csv("UNRATENSA.csv", stringsAsFactors = FALSE)
+summary(df)
+describe(df)
+print(df[which.min(df$UNRATENSA),])
+print(df[which.max(df$UNRATENSA),])
+```
+The unemployment rate data spans from January 1948 to June 2017, accounting for 834 months. There was no missing value in the data.
+The highest and lowest rate are within reasonably range [2.4,11.4] corresponding to `r df$DATE[which.min(df$UNRATENSA)]`
+and `r df$DATE[which.max(df$UNRATENSA)]`
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+hist(df2$UNRATENSA)
+unratensa <- ts(df2$UNRATENSA, frequency = 12, start = c(1948,1))
+emp.training <- window(unratensa, start = c(1948,1), end = c(2014,52))
+emp.test <- window(unratensa, start = c(2015,1))
+
+plot(emp.training)
+acf(emp.training, lag.max = 36)
+pacf(emp.training, lag.max = 36)
+monthplot(emp.training)
+
+emp.yd <- diff(emp.training, lag = 12)
+plot(emp.yd, ylab = "Relative search frequency for Unemployment Rates")
+
+plot(emp.yd)
+acf(emp.yd, lag.max = 36)
+pacf(emp.yd, lag.max = 36)
+monthplot(emp.yd)
+
+df3 <- read.csv("TOTALNSA.csv", stringsAsFactors = FALSE)
+head(df3)
+tail(df3)
+describe(df3) s
+
+hist(df3$TOTALNSA)
+totalnsa <- ts(df3$TOTALNSA, frequency = 12, start = c(1976,1))
+plot(totalnsa)
+acf(totalnsa, lag.max = 480)
+pacf(totalnsa, lag.max = 480)
+monthplot(totalnsa)
+
+```
+
+#Question 1:
+During your EDA, you notice that your data exhibits both seasonality (different months have different heights) AND that there is a clear linear trend. How many order of non-seasonal and seasonal differencing would it take to make this time-series stationary in the mean? Why?
+
+##UNRATENSA:
+
+Seasonal differencing
+```{r}
+for (D in 1:2){
+for (P in 0:2) {
+for (Q in 0:2) {
+m_emp_sd <- Arima(emp.training, order = c(0, 0, 0), seasonal = list(order = c(P,
+D, Q)), method = "ML")
+print(c(P, D, Q, m_emp_sd$aic))
+}
+}
+  }
+```
+
+
+Non-seasonal differencing
+```{r}
+for (d in 0:2){
+for (p in 0:4) {
+for (q in 0:4) {
+m_emp_nsd <- Arima(emp.training, order = c(p, d, q), seasonal = list(order = c(0,
+1, 1)), method = "ML")
+print(c(p, d, q, m_emp_nsd $aic))
+}
+}
+}
+```
+
+
+#Question 2: SARIMA
+It is Dec 31, 2016 and you work for a non-partisan think tank focusing on the state of the US economy. You are interested in forecasting the unemployment rate through 2017 (and then 2020) to use it as a benchmark against the incoming administration economic performance. Use the dataset UNRATENSA.csv and answer the following:
+
+##(A) Build a SARIMA model using the unemployment data and produce a 1 year forecast and then a 4 year forecast. Because it is Dec 31, 2016, leave out 2016 as your test data.
+```{r}
+print_resid_chart <- function(p, d, q, P, D, Q) {
+m <- Arima(emp.training, order = c(p, d, q), seasonal = list(order = c(P,
+D, Q)), method = "ML")
+print(hist(m$residuals))
+print(acf(m$residuals, 104))
+print(pacf(m$residuals, 104))
+}
+
+print_resid_chart(3, 0, 1, 2, 1, 1)
+print_resid_chart(3, 0, 2, 0, 1, 1)
+print_resid_chart(3, 0, 3, 0, 1, 1)
+```
+
+###Forecasting
+```{r}
+### Check whether differencing is needed and its impact on the model
+m1 <- Arima(emp.training, order = c(3, 0, 1), seasonal = list(order = c(0, 1, 1)))
+m2 <- Arima(emp.training, order = c(3, 0, 2), seasonal = list(order = c(0, 1, 1)))
+m3 <- Arima(emp.training, order = c(3, 0, 3), seasonal = list(order = c(0, 1, 1)))
+forecast1 <- forecast(m1, h = length(emp.test))
+forecast2 <- forecast(m2, h = length(emp.test))
+forecast3 <- forecast(m3, h = length(emp.test))
+plot(emp.test)
+lines(forecast1$mean, col = "red")
+lines(forecast2$mean, col = "blue")
+lines(forecast3$mean, col = "orange")
+```
+
+
+1. How well does your model predict the unemployment rate up until June 2017?
+
+
+2. What does the unemployment rate look like at the end of 2020? How credible is this estimate?
+
+##(B) Build a linear time-regression and incorporate seasonal effects. Be sure to evaluate the residuals and assess this model on the basis of the assumptions of the classical linear model, and then produce a 1
+year and a 4 year forecast.
+1/ How well does your model predict the unemployment rate up until June 2017?
+2/ What does the unemployment rate look like at the end of 2020? How credible is this estimate?
+3/ Compare this forecast to the one produced by the SARIMA model. What do you notice?
+
+#Question 3: VAR
+You also have data on automotive car sales. Use a VAR model to produce a 1 year forecast on both the unemployment rate and automotive sales for 2017 in the US.
+Compare the 1 year forecast for unemployment produced by the VAR and SARIMA models, examining both the accuracy AND variance of the forecast. Do you think the addition of the automotive sales data helps? Why or why not?

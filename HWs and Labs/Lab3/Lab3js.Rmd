@@ -1,0 +1,211 @@
+---
+title: 'Statistical Methods for Discrete Response, Time Series, and Panel Data: Lab3'
+author: "Phat Doan, Ted Pham, Jayashree Raman"
+date: "7/21/2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r}
+library(Hmisc)
+library(forecast)
+library(tseries)
+library(astsa)
+library(vars)
+```
+
+# Question 1:
+During your EDA, you notice that your data exhibits both seasonality (different months have different heights) AND that there is a clear linear trend. How many order of non-seasonal and seasonal differencing would it take to make this time-series stationary in the mean? Why?
+
+``` {r}
+#path <- "/Users/jayashreeraman/Dropbox/Lab3"
+#setwd(path)
+df2 <- read.csv("UNRATENSA.csv", stringsAsFactors = FALSE)
+head(df2)
+tail(df2)
+describe(df2)
+
+print_tsplots <- function(ts_data) {
+par(mfrow=c(2,2))
+plot(ts_data)
+acf(ts_data)
+pacf(ts_data)
+monthplot(ts_data)
+}
+unratensa <- ts(df2$UNRATENSA, frequency = 12, start = c(1948,1))
+
+print_tsplots(unratensa)
+
+emp.training <- window(unratensa, start = c(1976,1), end = c(2014,12))
+emp.test <- window(unratensa, start = c(2015,1))
+emp.test.log <- log(emp.test)
+
+print_tsplots(emp.training)
+
+emp.log <- log(emp.training)
+print_tsplots(emp.log)
+
+emp.yd <- diff(emp.training, lag = 12)
+print_tsplots(emp.yd)
+
+emp.yd.log <- diff(log(emp.training), lag = 12)
+print_tsplots(emp.yd.log)
+adf.test(emp.yd.log)
+pp.test(emp.yd.log)
+summary(emp.yd.log)
+```
+
+##UNRATENSA:
+
+#Question 2: SARIMA
+It is Dec 31, 2016 and you work for a non-partisan think tank focusing on the state of the US economy. You are interested in forecasting the unemployment rate through 2017 (and then 2020) to use it as a benchmark against the incoming administration economic performance. Use the dataset UNRATENSA.csv and answer the following:
+
+##(A) Build a SARIMA model using the unemployment data and produce a 1 year forecast and then a 4 year forecast. Because it is Dec 31, 2016, leave out 2016 as your test data.
+
+###Get the parameters P, Q, p and q
+```{r}
+#Get P and Q for the seasonal component
+for (p in 0:3) {
+for (q in 0:2) {
+for (P in 0:1) {
+for (Q in 0:2) {
+m <- Arima(emp.log, order = c(p, 1, q), seasonal = list(order = c(P, 1, Q), 12), method = "ML")
+print(c(p, q, P, Q, m$aic))
+}
+}
+}
+}
+```
+
+
+```{r}
+print_resid_chart <- function(p, d, q, P, D, Q) {
+m <- Arima(emp.yd.log, order = c(p, d, q), seasonal = list(order = c(P,
+D, Q), 12), method = "ML")
+par(mfrow=c(2,2))
+plot(m$residuals)
+acf(m$residuals, 120)
+pacf(m$residuals, 120)
+monthplot(m$residuals)
+}
+
+print_resid_chart(1, 1, 2, 1, 1, 1)
+print_resid_chart(1, 1, 2, 1, 1, 2)
+print_resid_chart(2, 1, 2, 1, 1, 1)
+print_resid_chart(2, 1, 2, 1, 1, 2)
+```
+
+###Forecasting
+```{r}
+### Check whether differencing is needed and its impact on the model
+# m1 <- Arima(emp.training, order = c(3, 2, 1), seasonal = list(order = c(0, 1, 2)))
+# m2 <- Arima(emp.training, order = c(3, 2, 2), seasonal = list(order = c(0, 1, 2)))
+# m3 <- Arima(emp.training, order = c(3, 2, 3), seasonal = list(order = c(0, 1, 2)))
+# m4 <- Arima(log(emp.training), order = c(3, 2, 2), seasonal = list(order = c(0, 1, 2)))
+
+m1 <- Arima(emp.log, order = c(1, 1, 2), seasonal = list(order = c(1, 1, 1)))
+m2 <- Arima(emp.log, order = c(1, 1, 2), seasonal = list(order = c(1, 1, 2)))
+m3 <- Arima(emp.log, order = c(2, 1, 2), seasonal = list(order = c(1, 1, 1)))
+m4 <- Arima(emp.log, order = c(2, 1, 2), seasonal = list(order = c(1, 1, 2)))
+forecast1 <- forecast(m1, h = length(emp.test.log))
+forecast2 <- forecast(m2, h = length(emp.test.log))
+forecast3 <- forecast(m3, h = length(emp.test.log))
+forecast4 <- forecast(m4, h = length(emp.test.log))
+
+ts.plot(emp.test.log,forecast1$mean,forecast2$mean,forecast3$mean,forecast4$mean, 
+        gpars=list(xlab="year", ylab="Unemployment Rate"), 
+        col = c("black", "red", "blue", "green", "orange"), lwd = 2, lty = 1:5)
+
+# lines(forecast1$mean, col = "red", lwd=2)
+# lines(forecast2$mean, col = "blue", lwd=2)
+# lines(forecast3$mean, col = "green", lwd=2)
+
+#lines(forecast4$mean, col = "green")
+
+par(mfrow=c(2,2))
+plot(m1$residuals)
+plot(m2$residuals)
+plot(m3$residuals)
+plot(m4$residuals)
+
+# adf.test(m1$residual)
+# adf.test(m2$residual)
+# adf.test(m3$residual)
+# adf.test(m4$residual)
+
+summary(m1)
+summary(m2)
+summary(m3)
+summary(m4)
+#lines(forecast3$mean, col = "green")
+```
+
+
+1. How well does your model predict the unemployment rate up until June 2017?
+
+
+2. What does the unemployment rate look like at the end of 2020? How credible is this estimate?
+
+##(B) Build a linear time-regression and incorporate seasonal effects. Be sure to evaluate the residuals and assess this model on the basis of the assumptions of the classical linear model, and then produce a 1 year and a 4 year forecast.
+
+```{r}
+
+```
+
+
+1/ How well does your model predict the unemployment rate up until June 2017?
+2/ What does the unemployment rate look like at the end of 2020? How credible is this estimate?
+3/ Compare this forecast to the one produced by the SARIMA model. What do you notice?
+
+#Question 3: VAR
+You also have data on automotive car sales. Use a VAR model to produce a 1 year forecast on both the unemployment rate and automotive sales for 2017 in the US.
+Compare the 1 year forecast for unemployment produced by the VAR and SARIMA models, examining both the accuracy AND variance of the forecast. Do you think the addition of the automotive sales data helps? Why or why not?
+
+##EDA to select the order of the VAR model
+```{r}
+df3 <- read.csv("TOTALNSA.csv", stringsAsFactors = FALSE)
+head(df3)
+tail(df3)
+#describe(df3)
+
+totalnsa <- ts(df2$UNRATENSA, frequency = 12, start = c(1976,1), end = c(2017, 6))
+par(mfrow=c(2,2))
+print_tsplots(totalnsa)
+
+tnsa.training <- window(totalnsa, start = c(1976,1), end = c(2014,12))
+tnsa.test <- window(totalnsa, start = c(2015,1))
+tnsa.log <- log(tnsa.training)
+
+adf.test(tnsa.log)
+
+adf.test(emp.log)
+
+empnsa <- cbind(emp.log, tnsa.log)
+plot.ts(empnsa, main="Unemployment Rate - National Automotive Sales")
+
+par(mfrow=c(1,2))
+ts.plot(emp.log, tnsa.log, gpars = list(xlab = "Time series period - 2015 - 2017", ylab = "Time series values", lty = c(1:3), pch = c(1,4), col = c("black", "blue")))
+ts.plot(window(emp.test.log, start = c(2017,1)), window(log(tnsa.test), start = c(2017,1)), gpars = list(xlab = "Time series period-2017", ylab = "Time series values", lty = c(1:3), pch = c(1,4), col = c("black", "blue")))
+po.test(empnsa)
+VARselect(empnsa, lag.max = 36, type = "both")
+```
+
+##Build the VAR model using order=25
+```{r}
+empnsa.var <- VAR(empnsa, p=25, type = "trend")
+coef(empnsa.var)
+par(mfrow=c(1,2))
+acf(resid(empnsa.var)[, 1])
+acf(resid(empnsa.var)[, 2])
+
+empnsa.pred <- predict(empnsa.var, n.ahead = length(tnsa.test))
+empnsa.pred
+emp.log.pred <- ts(empnsa.pred$fcst$emp.log[,1], st = c(2015,1), fr=12)
+tnsa.log.pred <- ts(empnsa.pred$fcst$tnsa.log[,1], st = c(2015,1), fr=12)
+ts.plot(log(tnsa.test), type = 'l')
+lines(tnsa.log.pred, type = 'l', col = 'red')
+
+ts.plot(emp.test.log, type = 'l')
+lines(emp.log.pred, type = 'l', col = 'blue')
+```
+

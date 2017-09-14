@@ -1,0 +1,571 @@
+---
+title: "Lab3"
+author: "Jayashree Raman | Ted Pham | Phat Doan"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Question 1:
+
+During your EDA, you notice that your data exhibits both seasonality (different months have different heights) AND that there is a clear linear trend. How many order of non-seasonal and seasonal differencing would it
+take to make this time-series stationary in the mean? Why?
+
+# Unemployment Rate Data
+
+## Import libraries
+```{r}
+library(Hmisc)
+library(forecast)
+library(tseries)
+library(astsa)
+library(vars)
+library(psych)
+library(zoo)
+```
+
+```{r}
+#TO BE DELETED
+# Set working directory, change to appropriate 
+path <- "D:/CloudStation/W271 Time Series/HWs and Labs/Lab3"
+#path <- "~/Documents/W271 Time Series/HWs and Labs/Lab3"
+#path <- "/Users/jayashreeraman/Dropbox/Lab3"
+setwd(path)
+```
+## Exploratory Data Analysis
+```{r}
+
+df <- read.csv("UNRATENSA.csv", stringsAsFactors = FALSE)
+
+summary(df)
+
+describe(df)
+
+unratensa <- ts(df$UNRATENSA, frequency = 12, start = c(1948,1))
+
+par(mfrow=c(2,1))
+plot(unratensa, main = "Per Month Unemployment Rate (1950 - Present)", 
+      xlab = "By month", ylab = "Unemployment Rate (%)")
+abline(reg=lm(unratensa~time(unratensa)), col="grey")
+
+#Display Year on Year trend
+plot(aggregate(unratensa,FUN=mean),  main = "Year on Year, Unemployment Rate (1950 - Present)", 
+      xlab = "Year on Year trend", ylab = "Unemployment Rate (%)")
+abline(reg=lm(unratensa~time(unratensa)), col="grey")
+
+par(mfrow=c(1,1))
+#
+boxplot(unratensa~cycle(unratensa), main = "Unemployment Rate by Month (1950 - Present)", 
+      xlab = "Month", ylab = "Unemployment Rate (%)")
+
+```
+
+The unemployment rate data spans from January 1948 to June 2017, accounting for 834 months. There was no missing value in the data.
+The lowest and higest rate are within percentage range [2.4,11.4] corresponding to `r df$DATE[which.min(df$UNRATENSA)]` and `r df$DATE[which.max(df$UNRATENSA)]`.
+
+Important Inferences:
+1/ The year on year trend shows slight increasing trend of unemployment rates over the year.
+2/ The variance and the mean value in Febuary and June is much higher than rest of the months.
+3/ Even though the mean value of each month is quite different their variance is small. Hence, we have strong seasonal effect with a cycle of 12 months or less.
+
+### Shorten data timeframe
+
+Between 1948 and 1970, the unemployment rate has a lower variance compared to 1970 to present. We observe lowest rate 2.1 was in October 1953. This rate seemed low and can be argued unreasonable for this current time period. There were several technological advances made in the 1970s that significantly changed the way society functioned. The first personal computer was introduced, internet was developed, rapid job automation through robotic breakthrough, the wolrd becomes more interconnected. These disruptions makes labor market more volatile, especially for the U.S. market with automation and offshoring that rapidly reducing the workforce without new job replacement. However, others can also argue that while blue labor jobs are disappearing, other jobs are also created. Therefore as a group, we have decided to forcus on 1970s (i.e. from 1976) data forward to take into consideration the tectonic paradigm shift within the labor market. In addition, this will make the unemployment data consistent with the data for autosale that starts from 1976.
+
+
+```{r}
+unrate.short <- window(unratensa,start = c(1976,1))
+
+par(mfrow=c(2,1))
+plot(unrate.short, main = "Unemployment Rate (1976 - Present)", 
+      xlab = "Time", ylab = "Unemployment Rate (%)")
+abline(reg=lm(unrate.short~time(unrate.short)), col="grey")
+
+#Display Year on Year trend
+plot(aggregate(unrate.short,FUN=mean),  main = "Year on Year, Unemployment Rate (1976 - Present)", 
+      xlab = "Year on Year trend", ylab = "Unemployment Rate (%)")
+abline(reg=lm(unrate.short~time(unrate.short)), col="grey")
+
+par(mfrow=c(1,1))
+#
+boxplot(unrate.short~cycle(unrate.short), main = "Unemployment Rate by Month (1976 - Present)", 
+      xlab = "Month", ylab = "Unemployment Rate (%)")
+
+```
+
+Important Inferences:
+1/ The year on year trend shows slight decreasing trend of unemployment rates over the year.
+2/ The variance and the mean value for November is much less than rest of the months.
+
+### Trend and Seasonality
+```{r}
+# plotting trend and seasonality
+k.smooth.wide <- ksmooth(time(unrate.short), unrate.short, kernel = c("normal"), bandwidth = 3) 
+k.smooth.narrow <- ksmooth(time(unrate.short), unrate.short, kernel = c("normal"), bandwidth = 0.3)
+plot(unrate.short, col = 'gray', main = "Unemployment Rate (1976 - Present)", 
+      xlab = "Time", ylab = "Unemployment Rate (%)")
+lines(k.smooth.wide$x, k.smooth.wide$y, col =  'red',lty = 3) #trend
+lines(k.smooth.narrow$x, k.smooth.narrow$y, col =  'blue', lty = 3) #seasonality
+legend("top", lty = c(1,3,3), legend = c("actual","narrow ksmooth","wide ksmooth"), col = c("gray","blue", "red"))
+```
+
+Using a narrow kernel smoother, we see evidence of seasonality in the blue line and the underlying trend in the red line.
+We can further confirm the appearance of seasonality and trend with acf and pacf plots.
+
+
+```{r}
+#par(mfrow = c(2,1))
+acf(unratensa, lag.max = 72)
+
+pacf(unratensa, lag.max = 72)
+```
+
+From the acf, pacf plots, we see clear evidence of AR process (with pacf peak at 1 month lag 0.1 and gradual decrease of acf) and seasonality with pcaf peaked again at lag 1 = 12 month. 
+From the ACF plot, a gradual decrease of ACF over time also indicates trends. Additionaly, we observe sporadic uptick at lags 1, 2, 3, which is an evident of seasonality every 12 months.
+
+Conclusion: The trend and seasonality must be omitted from the time series 
+
+### Transformation to stationary time series
+
+```{r}
+print_tsplots <- function(ts_data) {
+  par(mfrow=c(2,1))
+  plot(ts_data, ylab="Unemployment Rate (%)")
+  monthplot(ts_data, ylab="Unemployment Rate (%)", main="Month Plot")
+  
+  par(mfrow=c(2,1))
+  acf(ts_data,lag.max=72)
+  pacf(ts_data,lag.max=72)
+}
+
+emp.training <- window(unratensa, start = c(1976,1), end = c(2015,12))
+emp.test <- window(unratensa, start = c(2016,1))
+
+print_tsplots(emp.training)
+```
+
+From the time plot, we observe random walks in the data so it'd be reasonable to use first difference to stationary the data. Also from the adf plot, the data exhibits seasonality at 12 months (lag=1) so D can also be 1. 
+Before we perform the difference, we need to determine if a non-linear transformation is necessary. To do this,
+we examine the relationship between the trend and seasonality, specifically whether it's additive or multiplicative.
+
+```{r}
+par(mfrow=c(2,1))
+plot(decompose(emp.training)$random, ylab="", main="Decompose Unemployment Rate")
+plot(decompose(emp.training,type='multi')$random, ylab="", main="Decompose Unemployment Rate (Type=Multi)")
+
+```
+
+From the decomposition plots of the random component, it seems the multiplicative model for trend and seasonality is better because of a more constant variance. A log transfomration would be useful here.
+
+```{r}
+emp.log <- log(emp.training)
+print_tsplots(emp.log)
+
+emp.test.log <- log(emp.test)
+```
+
+Now we take the difference to substract the random walk effect and deseason the data.
+```{r}
+emp.yd.log <- diff(diff(emp.log, lag = 12))
+print_tsplots(emp.yd.log)
+```
+The pacf still have values outside of the confidence interval boundaries. We then run the adf and the unit root tests.
+
+
+```{r}
+adf.test(emp.log)
+pp.test(emp.log)
+adf.test(emp.yd.log)
+pp.test(emp.yd.log)
+```
+
+We see from the above tests that we need one differencing for the seasonal lag = 12(D=1) and one difference for the non-seasonal lags(d=1) to make the series weakly stationary - we will use these parameters later to create our SARIMA model.
+
+The unit root test and the adf.test both provide evidence  (p=0.01) to reject the null hypothesis that the transformed series is not stationary.
+
+
+## Modeling
+
+We create a function to find the best p,q,P,Q based on lowest AIC score.
+```{r}
+
+# define get best arima function
+get.best.arima <- function(ts,p,q,P,Q)
+{
+  #initialize best.aic to a large number 
+  best.aic <- 1e8
+   for (p.i in 0:p ) for (q.i in 0:q)
+    for (P.i in 0:P)  for (Q.i in 0:Q)
+    {
+      try(fit <-Arima(ts, order = c(p.i,1, q.i), seasonal = list(order = c(P.i,1, Q.i)), method = "ML"))
+
+      fit.aic <- fit$aic
+      #fit.aic <- -2*fit$loglik + (log(n)+1)*length(fit$coef)
+      if (fit.aic < best.aic)
+      {
+        best.aic <- fit.aic
+        best.fit <-fit
+        best.model <- c(p.i,1,q.i,P.i,1,Q.i)
+        print(c(p.i,1,q.i,P.i,1,Q.i,best.aic, fit$bic, fit$rmse))
+      }
+    }
+  list(best.aic,best.fit,best.model)
+}
+
+```
+
+From the previous PACF plot, we set max values for p,q as 5,5.
+```{r}
+get.best.arima(emp.log,5,5,1,1)
+```
+
+The output of our best.arima.model is (1,1,5,1,1,1) which has an AIC of -1914.7. The next best model is (1,1,2,1,1,1) with AIC of -1913.148.
+Since the AIC's are very close we now decide which model to move forward with.
+
+```{r}
+m1 <- Arima(emp.log, order = c(1, 1, 2), seasonal = list(order = c(1, 1, 1)))
+m2 <- Arima(emp.log, order = c(1, 1, 5), seasonal = list(order = c(1, 1, 1)))
+
+forecast1 <- forecast(m1, h = length(emp.test.log)+42)
+forecast2 <- forecast(m2, h = length(emp.test.log)+42)
+
+
+
+
+
+ts.plot(emp.test.log,forecast1$mean, forecast2$mean, 
+        gpars=list(xlab="year", ylab="Unemployment Rate"), 
+        col = c("black", "red", "green"), lwd = 2, lty = 1:5)
+
+plot(m1$residuals)
+plot(m2$residuals)
+accuracy(m1)
+accuracy(m2)
+
+```
+
+Since the two models are extremely close, we decide to go with (p,d,q,P,D,Q) of (1,1,2,1,1,1) because of its relative simplicity compared to the other model.
+
+But first, some helper functions for plotting and calculating the root mean square error.
+
+```{r}
+#helper function
+print_resid_chart <- function(m) {
+  
+par(mfrow=c(2,2))
+plot(m$residuals)
+hist(m$residuals)
+acf(m$residuals, 48)
+pacf(m$residuals, 48)
+}
+
+
+rmse <- function(error)
+{
+    sqrt(mean(error^2))
+}
+```
+
+### Forecasting to June 2017
+```{r}
+m1 <- Arima(emp.log, order = c(1, 1, 2), seasonal = list(order = c(1, 1,1)))
+
+forecast1 <- forecast(m1, h = 18)
+
+ts.plot(emp.test,exp(forecast1$mean), 
+        gpars=list(xlab="year", ylab="Unemployment Rate"), 
+        col = c("black", "red"), lwd = 2, lty = 1:2)
+abline(v=2021)
+abline(v=2016)
+abline(v=2017.4)
+```
+
+```{r}
+Box.test(m1$residuals, lag = 5)
+```
+We cannot reject the null hypothesis of no correlation with p-value = 0.2134 from the Box Jjung test.
+
+```{r}
+print_resid_chart(m1)
+```
+The data are independently distributed (i.e. the correlations in the population from which the sample is taken are 0, so that any observed correlations in the data result from randomness of the sampling process).
+
+#### How well does your model predict the unemployment rate up until June 2017?
+```{r}
+summary(m1)
+hist(forecast1$residuals)
+rmse(emp.test-exp(forecast1$mean))
+```
+The root mean square error for the forecast to june 2017 is `r rmse(emp.test-exp(forecast1$mean))` while the true values are within 4.1 to 5.2. This is a reasonable estimation of the model.
+
+
+### To the end of 2020
+```{r}
+m1 <- Arima(emp.log, order = c(1, 1, 2), seasonal = list(order = c(1, 1,1)))
+
+forecast2 <- forecast(m1, h = 60)
+
+ts.plot(emp.test,exp(forecast2$mean), 
+        gpars=list(xlab="year", ylab="Unemployment Rate"), 
+        col = c("black", "red"), lwd = 2, lty = 1:2)
+abline(v=2021)
+abline(v=2016)
+abline(v=2017.4)
+
+```
+
+
+
+2. What does the unemployment rate look like at the end of 2020? How credible is this estimate?
+
+
+```{r}
+
+df_fcst <- as.data.frame(forecast2)
+exp(df_fcst["Dec 2020",1])
+```
+By the end of 2020, the unemployment rate would have fallne to `r exp(df_fcst["Dec 2020",1])` and if the model was to extend out indefinitely, the unemployment rate would reach 0. We think using data up to Dec 2015 to predict unemployment rate up to the end of 2020, which is 6 years ahead, is not credible due to the extended period of time. We propose that a maximum of 2 years for forecasting would be best practice.
+
+
+##Build a linear time-regression and incorporate seasonal effects. Be sure to evaluate the residuals and assess this model on the basis of the assumptions of the classical linear model, and then produce a 1 year and a 4 year forecast.
+
+
+###Linear Regression model
+
+To account for seasonality in linear regression, we need to set up factors for categorical variables i.e. the months. In other words, we set up extra variables for each month
+and run linear regression. Fortunately, the encoding process for these variables is included in the R function "tslm" in the forecast library. We opted to use this function
+for brevity and readability.
+
+
+```{r}
+head(time(emp.training))
+lm_unemp <- tslm(emp.training ~ trend + season)
+summary(lm_unemp)
+```
+
+The values for lm_unemp are shown above with the parameters for the trend and seasons (from 2-12) with each season correspond to each month with the exception of January which 
+is represented by the intercept. The significance for each parameter is shown.
+
+
+###1. How well does your model predict the unemployment rate up until June 2017?
+
+
+We assess the linear regression model by checking the residual plots. The residuals vs. fitted show non-zero mean; the scale-location indicates non-constant variance; the normal
+Q-Q plot suggests non non linearity and skewdness in the data; and the residuals vs leverage shows several points above cook's distance. 
+All these observations together show that linear regression is not a good model, and the prediction based on this model will be biased and inaccuracte.
+
+```{r}
+par(mfrow=c(2,2))
+plot(lm_unemp)
+```
+
+
+
+
+```{r}
+lm_fcst<-ts(forecast(lm_unemp, h=60))
+
+hist(lm_fcst$residuals)
+
+```
+
+The histogram of the residuals confirm non normality of the error, violating the assumption6 of linear regression.
+
+
+
+```{r}
+ts.plot(emp.test,lm_fcst$mean, 
+        gpars=list(xlab="year", ylab="Unemployment Rate"), 
+        col = c("black", "red"), lwd = 2, lty = 1:2)
+```
+
+```{r}
+
+rmse(emp.test-lm_fcst$mean[1:18])
+```
+
+The root mean square error for the prediction with the linear regression model is 1.329. This seems unacceptable given the unemployment rate
+is 4.1 to 5.5 range. Compared to the Arima this error is EIGHT times more.
+
+
+
+###2. What does the unemployment rate look like at the end of 2020? How credible is this estimate?
+```{r}
+lm_fcst$mean[60]
+```
+The employment rate in 2020 is 5.59 which is higher than the Arima prediction of 3.8. However, we run in the problem with extended period of prediction so this estminate is not credible. And the model is not as accurate as the Arima model in predicting the rate from 2016 to June 2017, so we think it will be even less credible than the Arima model although 5.59 is within the reasonable range of unemployment rate between 1976 and 2016.
+
+
+
+###3. Compare this forecast to the one produced by the SARIMA model. What do you notice?
+
+```{r}
+ts.plot(emp.test,lm_fcst$mean, exp(forecast2$mean),
+        gpars=list(xlab="year", ylab="Unemployment Rate"), 
+        col = c("black", "red",'orange'), lwd = 2, lty = 1:3)
+```
+
+We plot the true values in solid black, SARIMA model forecasts in dotted orange, and linear regression forecast in dotted red. 
+Compared to the SARIMA model, the forecast from the linear regression model is higher and more conservative but doesn't follow the true values
+for the rate. Both models show an overall decreasing trend and seasonality; however, for the SARIMA the rate of decreasing is much higher.
+
+
+# Autosale Data and VAR modeling
+
+
+##EDA
+
+
+```{r}
+nsa <- read.csv("TOTALNSA.csv", stringsAsFactors = FALSE)
+head(nsa)
+tail(nsa)
+describe(nsa)
+```
+
+
+
+
+
+
+```{r}
+totalnsa <- ts(nsa$TOTALNSA, frequency = 12, start = c(1976,1))
+hist(totalnsa)
+```
+
+```{r}
+summary(totalnsa)
+```
+From checking the data and plotting the histogram, the autosale number seems reasonable, without any extreme outliers or extreme skewness.
+
+```{r}
+print_tsplots(totalnsa)
+```
+From the time series plots, we can see that the autosale data is not stationary. The data also exhibits seasonality from the ACF plot.
+And the seasonality lag seems to be at 12 month. 
+
+
+
+
+##Question 3: VAR
+You also have data on automotive car sales. Use a VAR model to produce a 1 year forecast on both the unemployment rate and automotive sales for 2017 in the US.
+Compare the 1 year forecast for unemployment produced by the VAR and SARIMA models, examining both the accuracy AND variance of the forecast. Do you think the addition of the automotive sales data helps? Why or why not?
+
+##Modeling
+
+The VAR modeling process begins with checking for unit root test.
+
+
+```{r}
+tnsa.training <- window(totalnsa, start = c(1976,1), end = c(2015,12))
+tnsa.test <- window(totalnsa, start = c(2016,1))
+
+adf.test(emp.log)
+pp.test(emp.log)
+adf.test(tnsa.training)
+pp.test(tnsa.training)
+
+```
+The adf and the unit root tests fail for the unemployment data but pass for the autosale data.
+So we need to check for cointegration of the two time series.
+
+```{r}
+#combine log of unemployment data and total autosale
+empnsa <- cbind(emp.log, tnsa.training)
+plot.ts(empnsa, main="Unemployment Rate - National Automotive Sales")
+```
+
+From the plot, the two series do not appear to be cointegrated because they don't progress in similar fashion.
+
+We confirm this observation with the Phillips-Ouliaris test. 
+```{r}
+po.test(empnsa)
+```
+
+The Philips-Oularis test (p-value of 0.01) clearly rejects the hypothesis that the series are cointegrated.
+We can now proceed to select the order of the VAR model
+
+###Select the order of the VAR model - Use VARSelect
+```{r}
+VARselect(empnsa, lag.max = 36, type = "both")
+```
+We see here that the lowest AIC is for order=26
+
+###Build the VAR model using order=26
+```{r}
+# build the model
+empnsa.var <- VAR(empnsa, p=26, type = "trend")
+#coef(empnsa.var)
+#test the model
+par(mfrow=c(2,2))
+hist(resid(empnsa.var)[, 1])
+hist(resid(empnsa.var)[, 2])
+acf(resid(empnsa.var)[, 1])
+acf(resid(empnsa.var)[, 2])
+```
+
+From the model diagnostic plots, we see that the VAR model with order 26 works well with normal distributions of the residuals for both time series. And the ACFs look like white noise.
+
+
+```{r}
+
+ccf(resid(empnsa.var)[, 1], resid(empnsa.var)[, 2])
+```
+the ccd plot verifies that the cross correlations are approx 0 for all non zero lags so the residuals are bivariate white noise.
+
+
+
+```{r}
+# make prediction 
+empnsa.pred <- predict(empnsa.var, n.ahead = 18)
+
+#Extract data from the prediction
+emp.pred <- ts(empnsa.pred$fcst$emp.log[,1], st = c(2016,1), fr=12)
+tnsa.pred <- ts(empnsa.pred$fcst$tnsa.training[,1], st = c(2016,1), fr=12)
+ts.plot(tnsa.test, type = 'l')
+lines(tnsa.pred, type = 'l', col = 'green')
+```
+
+The black line is the actual values for auto sale between 2016 and June 2017.
+The green line is the values from the VAR model.
+
+
+
+```{r}
+ts.plot(emp.test.log, type = 'l')
+lines(emp.pred, type = 'l', col = 'blue')
+```
+The black line is the actual values for unemployment rate between 2016 and June 2017.
+The blue line is the values from the VAR model for the unemployment rate.
+
+##Compare the 1 year forecast for unemployment produced by the VAR and SARIMA models, examining both the accuracy AND variance of the forecast. Do you think the addition of the automotive sales data helps? Why or why not?
+```{r}
+ts.plot(emp.test, window(exp(forecast1$mean), end = c(2017,6)), exp(emp.pred), 
+        gpars=list(xlab="year", ylab="Unemployment Rate"), 
+        col = c("black", "red", "blue"), lwd = 2, lty = 1:3)
+```
+The black curve indicate true Values whereas the dotted lines are the ones based on the model. Dotted Blue is for the VAR and red is for the SARIMA.
+```{r}
+print('rmse and variance for SARIMA forecast')
+rmse(emp.test - exp(forecast1$mean))
+var(emp.test - exp(forecast1$mean))
+print('rmse and variance for VAR forecast')
+rmse(emp.test - exp(emp.pred))
+var(emp.test - exp(emp.pred))
+summary(exp(emp.pred))
+```
+
+Both the root mean square error and the variance of the SARIMA model forecast are lower than those obtained from the 
+VAR model. Therefore, adding the autosale model does not help with the forecasting of the unemployment rate.
+For the VAR model to work better than the SARIMA, the added variables should have some sort of influence over the unemployment rate.
+Automotive sale  is unlikely to influence the broad employment outside of the automotive industry. It can be argued also that
+the unemployment rate might have more influence on autosale, hence the relationship between auto sale and and unemployment rate
+might not be equal, which is a prerequisite for the VAR model's performance.
+
+
+
+
+

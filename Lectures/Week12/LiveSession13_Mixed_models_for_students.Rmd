@@ -1,0 +1,137 @@
+---
+title: 'W271 Live Session 13: Mixed models'
+author: "Devesh Tiwari"
+date: "8/7/2017"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+# Main topics covered in Week 14 (Async Unit 13)
+      - Linear mixed-effect model
+      - The notion of fixed and random effects in the context of linear mixed effect model
+      - The independence assumption
+      -  Modeling random intercepts, slopes, and both random intercepts and slopes Mathematical formulation, estimation, model diagnostics, model identification, model selection, assumption testing, and statistical inference / forecasting, backtesting
+
+# Readings:
+**BMBW** Douglas Bates, Martin Machler, Benjamin Bolker, and Steve Walker. *Fitting Linear Mixed Effect Models Using lme4*
+
+
+Agenda:
+
+1. Review of terminonlogy and concepts
+
+2. Group R - demo
+
+
+# Review of terminology and concepts
+
+1. Panel data: Fixed and random effects review.
+
+Panel data has multiple observations (J) for cross-sectional units (I). Within these data, we are interested in the relationship between a dependent, or response, variable, and an independent variable of interest.
+
+    
+$$y_{i,j} = \alpha_0 + \beta_1*x_{i,j} + \epsilon_{i,j}$$
+    
+    
+\textbf{QUESTIONS: (1) What challenges do we face if we try to implement the above model? What is a fixed effects estimator in this context? What is a random effects model in this context?}
+
+
+2. Multi-level data structures
+
+Suppose that you were interested in understanding the 2016 Presidential election better. In particular, you want to know if poorer counties in the US tended to vote for the Democratic Party or not. You compile a dataset that has each counties' average income and the share of the county vote that were for the Democratic Party. You want to estimate the following:
+
+$$voteshare_{i,s} = \alpha_0 + \beta_1 income_{i,s} + \epsilon_{i,s}$$ 
+
+As a student of American politics, you suspect that state level charactersistics have an effect on county level vote-share, which is why we included subscript $s$. Therefore, you are dealing with a multi-level data set. In the OLS framework, the best we could would be do include a dummy variable for each state.
+
+\textbf{QUESTION: Social scientists often call this type of regression a "fixed effects" regression. Even though this is not a panel dataset, why do you think this is the case? What does the inclusion of state-level dummy variables do to the model above?}
+
+It is useful, though, to think about the ways in which a county's state effects it's vote-share:
+
+- Some states might have a history of supporting one party over another. So we can think of each state as having a separate mean for vote-share.
+    
+- The relationship between income and Democratic vote-share might differ across states. So we can think of each state as having a separate slope coefficient for the income variable.
+    
+- Because we are dealing with states now, it is likely the case that there is some state-level errors that are unaccounted for in the model.
+    
+- Because each county belongs to a given state, it is more than likely the case that error terms within each state are correlated.
+    
+    
+OLS is not well suited to deal with these issues, so instead we turn to linear mixed models as follows:
+
+$$ voteshare_{i,s} = \alpha_{s} + \beta_1 income_{i,s} + \epsilon_{i,s}$$ 
+where $$\alpha_s \sim N(\mu_{\alpha}, \sigma_{\alpha})$$
+
+Now, we are saying that each state in the data-set gets it's own intercept AND that those values are drawn from a random variable itself! In this setup, we call income a fixed effect (because it's effect is constant across states) and we would call $\alpha$ a random effect because it varies across states (or groups). 
+
+We can further estimate random intercept models, where each state gets it's own intercept term, and we can estimate random slope models, where each state gets it's own beta coefficient denoting the relationship between income and vote-share. We can also include group level (in this case state level) parameters into the model if we wanted to, and we could include multiple group level variables.
+
+# Group Discussion: Sleep study data 1
+
+1. Briefly explore the data. What do you notice about both plots?
+
+2. Given the heterogeneity across subjects, what is a better measure of the average reaction time, the global mean or subject specific mean?
+
+
+```{r}
+rm(list = c(ls()))
+library(lme4)
+library(stargazer)
+library(lattice)
+library(arm)
+
+data("sleepstudy")
+boxplot(sleepstudy$Reaction ~ sleepstudy$Subject)
+xyplot(Reaction ~ Days | Subject, data = sleepstudy)
+# Pause for question
+
+mean(sleepstudy$Reaction) #Global mean
+subjectMeans <- aggregate(sleepstudy$Reaction, by = list(sleepstudy$Subject), mean)
+subjectMeans$deviation_from_mean <- subjectMeans$x - mean(sleepstudy$Reaction)
+subjectMeans
+
+s.mean <- lmer(Reaction ~ 1 + (1 | Subject), data = sleepstudy)
+summary(s.mean)
+fixef(s.mean) ## Corresponds to the global mean above
+ranef(s.mean) ## Corresponds to the subject level impact on reaction
+coef(s.mean)$Subject  ## Subject level means. Note that they are slightly different!
+
+```
+
+# Group Discussion 2: Mixed modeling with the sleep study data
+1. Does sleep deprivation correspond to higher reaction times?
+
+2. What is the difference between lm.2 and model.random_intercept?
+
+```{r}
+lm.1 <- lm(Reaction ~ Days, data = sleepstudy)
+lm.2 <- lm(Reaction ~  Days + as.factor(Subject), data = sleepstudy)
+stargazer(lm.1, lm.2, type = "text", summary = FALSE)
+
+model.random_intercept <- lmer(Reaction ~ Days + (1 | Subject), data = sleepstudy)
+summary(model.random_intercept)
+fixef(model.random_intercept) # Impact that is consistent across groups
+ranef(model.random_intercept) # varies across gruops
+coef(model.random_intercept)  # These are the coefficients for each subject. Note that the only thing that differs
+                              # is the intercept, which is what we wanted!
+
+# Question: Once we have incorporated subject level effects, is Days still "statistically significant?
+s.mean <- lmer(Reaction ~ 1 + (1 | Subject), data = sleepstudy, REML = FALSE)
+model.random_intercept <- lmer(Reaction ~ Days + (1 | Subject), data = sleepstudy, REML = FALSE)
+anova(s.mean, model.random_intercept)
+```
+
+# Group Discussion 3: Random - slope model
+1. What does the random slope model tell you?
+
+2. How can you tell if you actually "need" the random slopes?
+
+```{r}
+model.random_slope <- lmer(Reaction ~ Days + (1 + Days|Subject), data = sleepstudy)
+fixef(model.random_slope)
+ranef(model.random_slope) # Note here that both the intercept and Days vary. Which is by design
+coef(model.random_slope)
+```
+
+

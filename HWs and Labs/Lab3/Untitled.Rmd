@@ -1,0 +1,143 @@
+---
+title: "Lab3_tp_v1"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Unemployment Rate Data
+
+## Exploratory Data Analysis
+```{r}
+library(Hmisc)
+library(forecast)
+
+# Set working directory, change to appropriate 
+path <- "/Users/tedpham/Documents/W271 Time Series/HWs and Labs/Lab3"
+setwd(path)
+df <- read.csv("UNRATENSA.csv", stringsAsFactors = FALSE)
+summary(df)
+describe(df)
+```
+
+The unemployment rate data spans from January 1948 to June 2017, accounting for 834 months. There was no missing value in the data.
+The lowest and higest are within range [2.4,11.4] corresponding to `r df$DATE[which.min(df$UNRATENSA)]`
+and `r df$DATE[which.max(df$UNRATENSA)]`.
+
+
+### Transform the dataset to time series object
+```{r}
+
+unratensa <- ts(df$UNRATENSA, frequency = 12, start = c(1948,1))
+unrate.short <- window(unratensa,start = c(1970,1))
+
+
+par(mfrow=c(1,2))
+hist(unratensa)
+hist(unrate.short)
+```
+
+```{r}
+par(mfrow=c(2,1))
+
+plot(unratensa)
+plot(unrate.short)
+```
+
+
+Between 1948 and 1970, the unemployment rate has a lower variance compared to 1970 to present. The lowest rate 2.1 was in October 1953 which seemed unreasonably low in this date and age. 1970 was when the first personal computer was introduced and since then there have been periods of technology disruptions and hence more volatile changes in the labor market. Today current working environment are facing similar trends of technology replacing labor workforce, economic downturn. We decide to include only 1970 data onward.
+
+
+### Trend and Seasonality
+
+```{r}
+emp.training <- window(unratensa, start = c(1970,1), end = c(2014,52))
+emp.test <- window(unratensa, start = c(2015,1))
+
+par(mfrow=c(2,2))
+plot(emp.training)
+acf(emp.training, lag.max = 36)
+pacf(emp.training, lag.max = 36)
+monthplot(emp.training)
+```
+
+From the ACF plot, a gradual decrease of ACF over time indicates trends. We also observe sporadic uptick at lags 1, 2, 3, which is evident of seasonality.
+The trend and seasonality must be omitted from 
+Add intepretation for the month plot XXX
+
+###Time Series Decomposition
+
+```{r}
+```
+
+
+```{r}
+```
+
+```{r}
+```
+
+### Transformation to Stationary Question 1:
+During your EDA, you notice that your data exhibits both seasonality (different months have different heights) AND that there is a clear linear trend. How many order of non-seasonal and seasonal differencing would it take to make this time-series stationary in the mean? Why? XXX
+
+
+
+```{r}
+
+emp.yd <- diff(emp.training, lag = 12)
+plot(emp.yd, ylab = "Relative search frequency for Unemployment Rates")
+
+par(mfrow=c(2,2))
+plot(emp.yd)
+acf(emp.yd, lag.max = 36)
+pacf(emp.yd, lag.max = 36)
+monthplot(emp.yd)
+
+```
+
+
+The pcaf still have values outside of the boundaries, first order difference does not completely render the series stationary.
+
+
+##Modeling
+```{r}
+
+# define get best arima function
+get.best.arima <- function(x.ts,p,d,q,P,D,Q)
+{
+  #initialize best.aic to a large number 
+  best.aic <- 1e8
+  n <- length(x.ts)
+  for (p.i in 0:p ) for (d.i in 0:d) for (q.i in 0:q)
+    for (P.i in 0:P) for (D.i in 0:Q) for (Q.i in 0:Q)
+    {
+      fit <- arima(x.ts, order = c(p.i,d.i,q.i),
+                         seas = list(order = c(P.i,D.i,Q.i)),
+                         frequency(x.ts),method = 'ML')
+      fit.aic <- -2*fit$loglik + (log(n)+1)*length(fit$coef)
+      if (fit.aic < best.aic)
+      {
+        best.aic <- fit.aic
+        best.fit <-fit
+        best.model <- c(p.i,d.i,q.i,P.i,D.i,Q.i)
+      }
+    }
+  list(best.aic,best.fit,best.model)
+}
+
+
+
+get.best.arima(emp.training,2,2,2,0,0,0)
+```
+
+```{r}
+
+```
+
+
+```{r}
+
+```

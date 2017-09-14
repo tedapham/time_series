@@ -1,0 +1,327 @@
+---
+title: "Statistical Methods for Discrete Response, Time Series, and Panel Data (W271): Lab 1"
+author: "W271 Instructional Team"
+date: "May 28, 2017"
+output: pdf_document
+---
+
+# Instructions:
+
+*  **Due Date: As specified by your Professor**
+
+* Submission:
+    * Submit your own assignment via ISVC
+    * Submit 2 files:
+        1. A pdf file including the summary, the details of your analysis, and all the R codes used to produce the analysis. Please do not suppress the codes in your pdf file.
+        2. R markdown file used to produce the pdf file
+    * Each group only needs to submit one set of files
+    * Use the following file naming convensation; fail to do so will receive 10% reduction in the grade:
+        * SectionNumber_hw01_FirstNameLastNameFirstInitial.fileExtension
+        * For example, if you are in Section 1 and have two students named John Smith and Jane Doe, you should name your file the following
+            * Section1_hw01_JohnS_JaneD.Rmd
+            * Section1_hw01_JohnS_JaneD.pdf
+    * Although it sounds obvious, please write the name of each members of your group on page 1 of your report.
+    * This lab can be completed in a group of up to 3 people. Each group only needs to make one submission. Although you can work by yourself, we encourage you to work in a group.
+    * When working in a group, do not use the "division-of-labor" approach to complete the lab. That is, do not divide the lab by having Student 1 completed questions 1 - 3, Student 2 completed questions 4 - 6, etc. Asking your teammates to do the questions for you is asking them take away your own opportunity to learn.
+
+* Other general guidelines:
+    * Try to use only techniques and R libraries that are covered in this course.
+    
+    * If you use R libraries and/or functions to conduct hypothesis tests not covered in this course, you will have to explain why the functions you use are appropriate for the hypothesis you are asked to test. Lacking explanations will result in a score of zero for the corresponding question.
+  
+    * Thoroughly analyze the given dataset. Detect any anomalies, including missing values, potential of top and/or bottom code, etc, in each of the variables.
+    
+    * Your report needs to include a comprehensive Exploratory Data Analysis (EDA) analysis, which includes both graphical and tabular analysis, as taught in this course. Output-dump (that is, graphs and tables that don't come with explanations) will result in a very low, if not zero, score.
+    
+    * Your analysis needs to be accompanied by detailed narrative. Remember, make sure your that when your audience (in this case, the professors and your classmates) can easily understand your your main conclusion and follow your the logic of your analysis. Note that just printing a bunch of graphs and model results, which we call "output dump", will likely receive a very low score.
+    
+    * Your rationale of any decisions made in your modeling needs to be explained and supported with empirical evidence. Remember to use the insights generated from your EDA step to guide your modeling step, as we discussed in live sessions.
+    
+    * All the steps to arrive at your final model need to be shown and explained very clearly.
+
+*  Students are expected to act with regards to UC Berkeley Academic Integrity.
+
+# Investigation of the 1989 Space Shuttel Challenger Accident 
+
+1. Read the Dala et al (1989) paper (attached in this zip file).
+2. Conduct a thorough analysis and EDA of the given dataset "challenger.csv", as we did in live session 2 and 3. Pay attention to the instructions given above.
+3. Answer question 4 and 5 on Chapter 2 (page 129 and 130) of Bilder and Loughin's *"Analysis of Categorical Data with R"*
+4. In addition to the questions in Question 4 and 5, answer the following questions:
+  a. Interpret the main result of your final model in terms of both odds and probability of failure 
+  b. Plot the main effect of your final model with the y-axis being probability of failure and x-axis being *temperature*.
+
+```{r}
+df = read.csv('challenger.csv',sep=',')
+summary(df)
+table(df$O.ring)
+```
+
+EDA here
+
+```{r}
+par(mfrow=c(2,2))
+hist(df$Temp)
+hist(df$Pressure)
+hist(df$O.ring)
+plot(df$Pressure,df$Temp)
+
+```
+Pressure values are more dispersed than temperatures. While pressure only have 3 discrete variables, temperature spans between 53 to 81 degree. This makes sense because the pressure is the internal combustion pressure and temperature is the outside at launch.```{r}
+
+```{r}
+plot(df$Temp,df$Pressure,pch=c(24,25,25)[df$O.ring+1],bg=c("green","blue","red")[(df$O.ring+1)])
+legend("bottomleft", pch = c(24,25,25), col = c("green", "blue", "red")
+       ,c("0","1","2")
+       ,box.col = "gray"
+       ,cex=.8)
+```
+Question 4: 
+(a) Discuss why the assumption that each O-ring is independent for each launch is necessary for Dalal et al.'s model?
+What are the potential problems with it?
+
+The assumption is needed for fitting the logit function. Otherwise the probability of an event will not be
+easily calculated. The O-ring might be from the same manufacture, same patch and contain the same defects .
+
+(b) Estminate the logistic regression using the explanatory variables in a linear form
+```{r}
+
+df$failure = ifelse(df$O.ring == 0,0,1)
+model1 = glm(formula = failure~Temp+Pressure,family = binomial(link=logit),data = df)
+summary(model1)
+```
+(c) Perform LRTs to judge the importance of the explanatory variables in a linear form
+```{r}
+library(car)
+Anova(model1,test='LR')
+```
+(d) The authors chose to remove Pressure from the model based on the LRTs. Based on your results,
+discuss why you think this was done? Are there any potential problems with removing this variable?
+  - The LR test for pressure was insignificant. The pressure can be a surrogate measure for the internal combustion temperature and the difference in
+  this temperature and launch temperature might have an effect on the model.
+
+
+
+Question 5:
+
+(a) Estimate the simplified model logit($pi$) = $\beta_0 + \beta_1 *temp$
+```{r}
+
+# Binarize if there's an O.ring failure at each launch
+df$failure = ifelse(df$O.ring == 0,0,1)
+binaryModel = glm(formula = failure~Temp,family = binomial(link=logit),data = df)
+summary(binaryModel)
+
+# Get proportion of failed O rings at each launch for 
+df$ProbFail= df$O.ring/df$Number
+binomialModel = glm(formula = ProbFail~ Temp, family = quasibinomial(link = logit), data = df)
+summary(binomialModel)
+
+```
+  - The estimated parameters for the binary model are both statistically significant whereas the binomial estimated parameters are not. However $\beta_1's$ are both negative for the two models, consistent with what we found previously with the both temperature and pressure as independent variables.
+  - The AIC for temperature only binary model is 24.315, which is smaller than 24.782 for both temp and Pressure model. This might imply a better fit with just temperature as the dependent variable.
+  
+  - We can compute the likelihood ratio test for the binary model and the result corroborate our interpretation with the Wald p-values.
+```{r}
+Anova(binaryModel,test='LR')
+```
+          
+
+(b) Construct two plot: (1) pi vs. Temp (2) Expected number of failures vs Temp.
+Use the temp range of 31 to 81 on the x-axis even though the minimum temp in the data set was 53
+```{r}
+temp = seq(31,85,by=1)
+prob = predict(binomialModel,data.frame(Temp=temp),type ='response')
+plot(temp,prob)
+title('pi vs. Temp')
+```
+```{r}
+
+plot(temp,prob*6, ylab='Expected number of failure')
+title('pi vs. Temp')
+```
+```{r}
+temp = seq(31,85,by=1)
+prob = predict(binaryModel,data.frame(Temp=temp),type ='response')
+plot(temp,prob)
+title('Expected # vs. Temp')
+
+```
+
+```{r}
+
+plot(temp,prob*6, ylab='Expected number of failure')
+title('Expected # of Failure vs. Temp')
+```
+(c) Include the 95% Wald Confidance interval bands for pi on the plot. Why are the bands much wider for lower temperatures
+than for higher temperature?
+
+```{r}
+curve(expr = predict(object = binomialModel, newdata = data.frame(Temp = x), type = "response"), col = "red", xlim=c(31,85),ylim=c(0,1),
+      xlab='Temperature in F', ylab='Probability of O-ring Failures', main=' Probability of Failure vs. Temperature')
+
+
+ci.pi <- function(newdata, mod.fit.obj, alpha){ 
+  
+    linear.pred <- predict(object = mod.fit.obj, newdata =newdata, type = "link", se = TRUE) 
+    CI.lin.pred.lower <- linear.pred$fit - qnorm(p = 1-alpha/2)*linear.pred$se
+    CI.lin.pred.upper <- linear.pred$fit + qnorm(p =1-alpha/2)*linear.pred$se
+    CI.pi.lower <- exp(CI.lin.pred.lower) / (1 + exp(CI.lin.pred.lower))
+    CI.pi.upper <- exp(CI.lin.pred.upper) / (1 + exp(CI.lin.pred.upper))
+    list(lower = CI.pi.lower, upper = CI.pi.upper)
+}
+
+
+curve(expr = ci.pi(newdata = data.frame(Temp = x),
+mod.fit.obj = binomialModel, alpha = 0.05)$lower, col = "blue", lty
+= "dotdash", add = TRUE)
+
+curve(expr = ci.pi(newdata = data.frame(Temp = x),
+mod.fit.obj = binomialModel, alpha = 0.05)$upper, col = "blue", lty
+= "dotdash", add = TRUE)
+
+legend("topright",legend=c('95% Confident Interval','Probability of Failure'),
+       lty=c('dotdash','solid'), col=c('blue','red'),bty='n')
+```
+```{r}
+curve(expr = predict(object = binaryModel, newdata = data.frame(Temp = x), type = "response"), col = "red", xlim=c(31,85),
+      xlab='Temperature in F', ylab='Probability of O-ring Failures', main=' Probability of Failure vs. Temperature')
+
+
+curve(expr = ci.pi(newdata = data.frame(Temp = x),
+mod.fit.obj = binaryModel, alpha = 0.05)$lower, col = "blue", lty
+= "dotdash", add = TRUE)
+
+curve(expr = ci.pi(newdata = data.frame(Temp = x),
+mod.fit.obj = binaryModel, alpha = 0.05)$upper, col = "blue", lty
+= "dotdash", add = TRUE)
+
+legend("topright",legend=c('95% Confident Interval','Probability of Failure'),
+       lty=c('dotdash','solid'), col=c('blue','red'),bty='n')
+```
+```{r}
+curve(expr = exp(x)/(1+exp(x)),xlim=c(-5,2),xlab='logit',ylab='probability')
+```
+XXX At low temperature, the logit fit value is positive and at high temperature it's negative. A plot of probability vs logit gives
+an intuition why the Confidence level is more broad at low temperature where the probabily vs logit curve has a much high positive
+slope. This might also be due to the lower number of observations at 50 degree or lower, leading the wider band at lower temperature.
+
+(d) The temp was 31 at launch for the Challenger in 1986. Estimate the probability of an O-ring failure using this temperature,
+and compute a corresponding confidence interval. Discuss what assumptions need to be made in order to apply the inferences 
+procedures?
+```{r}
+temp = data.frame(Temp = 31)
+pred = predict(binomialModel,newdata=temp,type = 'response')
+confidence = ci.pi(newdata = temp, binomialModel,alpha = 0.05)
+data.frame(predicted_probability_failure = pred, confidence_interval = confidence)
+
+pred.binary = predict(binaryModel,newdata=temp,type = 'response')
+confidence.binary = ci.pi(newdata = temp, binaryModel,alpha = 0.05)
+data.frame(predicted_probability_failure = pred.binary, confidence_interval = confidence.binary)
+```
+Confidence interval is broader for the binomial as expected. The binary model and binomial predicts 81.78% and 99.9% of failures respectively.
+Assumptions:
+  - The MLE has a normal distribution
+  - 
+  
+(e) Using the parametric bootstrap, compute 90% confidence intervals separately at temperatures of 31 and 72.
+```{r}
+# 1st approach
+nBoot = 1000
+library(dplyr)
+
+# Bootstrap a large dataset each with 23 temp measurements
+large.dataset = replicate(nBoot,sample_n(data.frame(df$Temp,df$ProbFail),23,replace=TRUE))
+
+# Update probability to simulated
+for (i in 1:nBoot){
+  dfi = data.frame(prob = large.dataset[,i]$df.ProbFail, Temp = large.dataset[,i]$df.Temp)
+  model = glm(formula  = prob ~ Temp, family = binomial(link = "logit"), data = dfi)
+  updateProb = predict(object = model, data.frame(Temp = dfi$Temp),type='response')
+  # Update
+  large.dataset[,i]$df.ProbFail = updateProb
+}
+
+# Refit the model and get 90% confidence level for temperature at temptoExamine
+bootstrap90 <- function(temptoExamine, large.dataset, nBoot){
+  probability.failure = c()
+  for (i in 1:nBoot){
+    dfi = data.frame(prob = large.dataset[,i]$df.ProbFail, Temp = large.dataset[,i]$df.Temp)
+    model = glm(formula  = prob ~ Temp, family = binomial(link = "logit"), data = dfi)
+    
+    
+    logit = model$coefficient[1] + model$coefficient[2]*temptoExamine
+    bootstrap.prob = exp(logit)/(1+exp(logit))
+    probability.failure = c(probability.failure,bootstrap.prob)
+  }
+ 
+  lower= quantile(probability.failure,0.05)
+  upper= quantile(probability.failure,0.95)
+  list(lower,upper)
+  
+}
+
+bootstrap90(31,large.dataset,nBoot)
+bootstrap90(72,large.dataset,nBoot)
+
+```
+```{r}
+# 1st approach
+nBoot = 50
+library(dplyr)
+
+# Bootstrap a large dataset each with 23 temp measurements
+large.dataset = replicate(nBoot,sample_n(data.frame(df$Temp,df$ProbFail),23,replace=TRUE))
+
+
+# Refit the model and get 90% confidence level for temperature at temptoExamine
+bootstrap90 <- function(temptoExamine, large.dataset, nBoot){
+  probability.failure = c()
+  for (i in 1:nBoot){
+    dfi = data.frame(prob = large.dataset[,i]$df.ProbFail, Temp = large.dataset[,i]$df.Temp)
+    model = glm(formula  = prob ~ Temp, family = quasibinomial(link = "logit"), data = dfi)
+    
+    
+    logit = model$coefficient[1] + model$coefficient[2]*temptoExamine
+    bootstrap.prob = exp(logit)/(1+exp(logit))
+    probability.failure = c(probability.failure,bootstrap.prob)
+  }
+ 
+  lower= quantile(probability.failure,0.05)
+  upper= quantile(probability.failure,0.95)
+  list(lower,upper)
+  
+}
+
+bootstrap90(31,large.dataset,nBoot)
+bootstrap90(72,large.dataset,nBoot)
+
+```
+```{r}
+predict(object=binomialModel,newdata=data.frame(Temp=c(31,72)),type='response')
+```
+(f) Determine if a quadratic term is needed in the mdoel for the temperature?
+
+```{r}
+# Binarize if there's an O.ring failure at each launch
+
+binaryModel2 = glm(formula = failure~Temp + I(Temp^2),family = binomial(link=logit),data = df)
+summary(binaryModel2)
+
+# Get proportion of failed O rings at each launch for 
+
+binomialModel2 = glm(formula = NumberFail ~ Temp + I(Temp^2), family = quasibinomial(link = logit), data = df)
+summary(binomialModel2)
+```
+AIC is higher for the model with added Temp quadratic term.
+
+
+Extra: Interpret the main result of your final model in terms of both odds and probability of failure 
+
+The final model is with 
+
+Extra: 
+Plot the main effect of your final model with the y-axis being probability of failure and x-axis being *temperature*.
+
+
+
+

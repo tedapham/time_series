@@ -1,0 +1,1274 @@
+---
+title: "Statistical Methods for Discrete Response, Time Series, and Panel Data (W271): Lab 4"
+author: "Matt Shaffer"
+date: "August 10, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning = F, error = F, message = F}
+#rm(list = ls())
+library(plm)
+library(lme4)
+library(stargazer)
+library(lattice)
+library(arm)
+library(Hmisc)
+library(psych)
+library(car)
+library(foreign)
+library(gplots)
+library(lmtest)
+```
+
+
+** Helper Functions **
+
+```{r}
+# Color scheme
+line_color1 <- rgb(165/255, 203/255, 223/255) 
+line_color2 <- rgb(199/255, 37/255, 4/255, 0.5) 
+line_color3 <- rgb(200/255, 200/255, 200/255, 0.5) 
+line_color4 <- rgb(133/255, 161/255, 198/255, 0.25)
+colfunc <- colorRampPalette(c("red","yellow","springgreen","royalblue"))
+```
+
+
+```{r}
+# Plot one or two histograms with normal curve
+# Usage example:
+# norm_hist(data.ts, data2.ts=NULL, br=breaks)
+norm_hist <- function(data.ts, data2.ts=NULL, br=30, xlabel="", xlabel2="", title="", title2="") {
+  if (!is.null(data2.ts)){
+    par(mfrow=c(1, 2))
+  }
+  h <- hist(data.ts, col=rgb(6/255, 57/255, 126/255, 0.4), 
+            lwd = 2, breaks = br,
+            main=title, xlab = xlabel)
+  xfit <- seq(min(data.ts), max(data.ts), length = 40) 
+  yfit <- dnorm(xfit, mean = mean(data.ts), sd = sd(data.ts)) 
+  yfit <- yfit * diff(h$mids[1:2]) * length(data.ts) 
+  lines(xfit, yfit, col = rgb(199/255, 37/255, 4/255, 0.5), lwd = 2)
+  
+  if (!is.null(data2.ts)){
+    h <- hist(data2.ts, col=rgb(6/255, 57/255, 126/255, 0.4), breaks=br,
+              main=title2, xlab = xlabel2)
+    xfit <- seq(min(data2.ts), max(data2.ts), length = 40)
+    yfit <- dnorm(xfit, mean = mean(data2.ts), sd = sd(data2.ts))
+    yfit <- yfit * diff(h$mids[1:2]) * length(data2.ts)
+
+    lines(xfit, yfit, col = rgb(199/255, 37/255, 4/255, 0.5), lwd = 2)
+  }
+}
+```
+
+
+```{r}
+# Plotting function for xyplots to compare against dependent variable over time of panel
+# usage example: 
+# 1. vector of explanatory variables: explanatory_var <- c('bac08', 'bac10')
+# 2. set or subset of data: data_group <- drive[drive$state.name == 'California', ]
+# 3. dependent variable within set: dependent_var <- data_group$totfatrte
+# 4. call function: xyplot_groups_year(data_group, dependent_var, explanatory_var)
+
+xyplot_groups_year <- function(data_group, dependent_var, explanatory_var) {
+  xyplot(dependent_var ~ year | explanatory_var, 
+       data = data_group, 
+       aspect = "xy", type = c("g", "p", "r"),
+       index.cond = function(x, y) coef(lm(y ~ x))[2], 
+       alpha=c(1, 0.5, 0.5), as.table = TRUE,
+       ylab = "total fatalities per 100,000 population",
+       xlab = "Year",
+       par.settings=simpleTheme(col=line_color1, col.line="red") 
+       )
+}
+```
+
+
+
+```{r}
+load("driving.Rdata")
+drive <- data
+```
+
+Since the data description states that the state variable is `48 continental states, alphabetical`, we can add state names with an alphabetical list of state names. We will use `states.txt` and remove Hawaii and Alaska. 
+
+```{r}
+state_names <- read.table('./states.txt', sep='\n')
+lower48 <- data.frame(state_names[which(state_names$V1 != 'Alaska' & state_names$V1 != 'Hawaii'), ])
+colnames(lower48) <- c("state")
+state.idx <- seq(1,48,1)
+drive$state.id <- state.idx[as.factor(drive$state)]
+drive$state.name <- as.character(lower48[match(drive$state.id, row(lower48)),1])
+```
+
+
+## Dataset Overview
+
+### Question 1: EDA
+##### 1. Load the data. Provide a description of the basic structure of the dataset, as we have done in throughout the semester. Conduct a very thorough EDA, which should include both graphical and tabular techniques, on the dataset, including both the dependent variable *totfatrte* and the potential explanatory variables.
+
+```{r}
+# View(drive)
+str(drive)
+```
+
+
+** Check for missing values  **
+
+There are no missing values, and our dataset is balanced as we have a full set of observations for each group at each time interval. 
+
+```{r}
+sapply(drive, function(x) sum(is.na(x)))
+```
+
+
+** Categorical Variables **
+
+Categorical variables in the data are as follows:
+
+```{r}
+print('bac08')
+unique(drive$bac08)
+print('bac10')
+unique(drive$bac10)
+print('perse')
+unique(drive$perse)
+print('sbprim')
+unique(drive$sbprim)
+print('sbsecon')
+unique(drive$sbsecon)
+print('s170plus')
+unique(drive$sl70plus)
+print('gdl')
+unique(drive$gdl)
+unique(drive$perc14_24)
+```
+
+The way the categorical variables are coded, the values look more like continous variables and may be confusing when applying our model using them as raw inputs. One strategy to deal with this is to use a binary representation, and another is to use bins. In this particular case, the fractional representations we have are essentially subdivisions of our panels. So, a value of `0.05` for `s170plus` indicates that speed limits exceeding 70 mph were applicable for half of the corresponding year. Since our panels are on a yearly interval, it might make more sense to simply binarize those variables that represent fractional units of time.  
+
+```{r}
+drive$bac08.binary = ifelse(drive$bac08 >= 0.5, 1, 0)
+drive$bac10.binary = ifelse(drive$bac10 >= 0.5, 1, 0)
+drive$perse.binary = ifelse(drive$perse >= 0.5, 1, 0)
+drive$sl70plus.binary = ifelse(drive$sl70plus >= 0.5, 1, 0)
+drive$gdl.binary = ifelse(drive$gdl >= 0.5, 1, 0)
+```
+
+
+** Other Variable Transformations **
+
+
+# DELETE?
+
+```{r}
+# drive$vehicmilespc.log = log10(drive$vehicmilespc)
+# drive$unem.log = log10(drive$unem)
+# drive$perc14_24.log = log10(drive$perc14_24)
+```
+
+
+```{r}
+# norm_hist(drive$vehicmilespc, log10(drive$vehicmilespc))
+# norm_hist(drive$unem, log10(drive$unem))
+# norm_hist(drive$perc14_24, log10(drive$perc14_24))
+```
+
+
+
+```{r}
+#head(drive, 10)
+```
+
+```{r}
+#tail(drive, 10)
+```
+
+
+```{r}
+#norm_hist(drive$totfatrte, drive$totfat)
+```
+
+
+
+```{r}
+colfunc <- colorRampPalette(c("red","yellow","springgreen","royalblue"))
+
+p10 <- ggplot(drive, aes(x = factor(year), y = totfatrte, color=(colfunc(length(unique(drive$year)))))) +
+        geom_boxplot(fill = (colfunc(length(unique(drive$year)))), colour = "#1F3552",
+                     alpha = 0.7) +
+        scale_y_continuous(name = "total fatalities per 100,000 population") +
+        scale_x_discrete(name = "Year") +
+        ggtitle("Total fatalities per 100,000 population by year") + 
+  theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+p10
+```
+
+
+The boxplot for the total fatalities per 100,000 populaton shows a lot of heterogeneity between states. Mississippi , New Mexico, and Wyoming stand out as having a relatively high percentage of fatalities, although Mississippi has a much smaller interquartile rage than the other two. Connecticut, Massachusetts and Rhode Island are on the other end of the spectrum, and show unusually low total fatalities per unit of population. 
+
+```{r}
+#fill <- "#4271AE"
+#line <- "#1F3552"
+colfunc <- colorRampPalette(c("red","yellow","springgreen","royalblue"))
+
+p10 <- ggplot(drive, aes(x = state.name, y = totfatrte)) +
+        geom_boxplot(fill = (colfunc(length(unique(drive$state.name)))), colour = "#1F3552",
+                     alpha = 0.7) +
+        scale_y_continuous(name = "total fatalities per 100,000 population") +
+        scale_x_discrete(name = "State") +
+        ggtitle("Total fatalities per 100,000 population by state") + 
+  theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+p10
+```
+
+
+Even though vehicle miles driven have gone up since 1980, total fatalities per mile driven have dropped significantly.
+
+```{r}
+ggplot(drive, aes(x=year, y=totfatpvm), line=factor(state)) +
+      geom_line(aes(group=state), colour=colfunc(1200)) + 
+      labs(x="Year", y="Total Fatalities per 100M Miles Driven",
+           title="Average Total Fatalities per 100M Miles Driven Grouped by State 1980-2004")
+      theme(axis.text.x=element_text(angle=60, hjust=1))
+      
+ggplot(drive, aes(x=year, y=vehicmilespc), line=factor(state)) +
+      geom_line(aes(group=state), colour=colfunc(1200)) + 
+      labs(x="Year", y="Miles Driven Per Capita", 
+           title="Vehicle Miles Driven Per Capita Grouped by State 1980-2004")
+      theme(axis.text.x=element_text(angle=60, hjust=1))
+```
+
+
+
+We can also look at the total change betwen only the years 1980 and 2004 and plot the direction of the change in number of fatalities per 100,000 population. States like Alabama, Arkansas and Kentucky show very little change at all, while states like Nevada and Wyoming experience large drops in fatalities.
+
+
+```{r}
+p10 <- ggplot(drive[(drive$d80 == 1)|(drive$d04 == 1),], aes(x = state.name, y = totfatrte, color=state.name)) +
+        geom_line(arrow = arrow(angle = 15, ends = "last", type = "closed", length = unit(0.1, "inches")),
+                     alpha = .9, lwd=1, show.legend = F) +
+        scale_y_continuous(name = "total fatalities per 100,000 population") +
+        scale_x_discrete(name = "Year") +
+        ggtitle("Change in total fatalities per 100,000 population by state 1980-2004") + 
+  theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+p10
+```
+
+
+
+One particularly interesting observation is the statistics of our dependent variable in relation to the binarized `sl70plus` speed limits of 70 and over For states with e can see that there is a clear separation of the conditional means beginning in 1996.
+
+```{r}
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(sl70plus.binary))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by 70+ speed limit") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+```
+
+
+```{r}
+ggplot(drive[drive$year > 1995,], aes(x=sl70plus.binary, y=totfatrte, fill=factor(sl70plus.binary))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Speed limit Greater than or Equal to 70 mph") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by spped limit >= 70") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+```
+
+
+```{r}
+ggplot(drive, aes(x=year, y=perc14_24), line=factor(state)) +
+      geom_line(aes(group=state), colour=colfunc(1200)) + 
+      labs(x="Year", y="Percentage of population age 14-24",
+           title="Percentage of Population age 14-24 Grouped by State 1980-2004")
+      theme(axis.text.x=element_text(angle=60, hjust=1))
+```
+
+
+
+# DELETE
+```{r}
+colfunc <- colorRampPalette(c("red","yellow","springgreen","royalblue"))
+
+p10 <- ggplot(drive[(drive$d80 == 1)|(drive$d04 == 1),], aes(x = state.name, y = seatbelt, color=factor(year))) +
+        geom_point(alpha = 0.7) +
+        scale_y_continuous(name = "total fatalities per 100,000 population") +
+        scale_x_discrete(name = "Year") +
+        ggtitle("Total fatalities per 100,000 population by state change 1980-2004") + 
+  theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+p10
+```
+
+# DELETE
+
+```{r}
+colfunc <- colorRampPalette(c("red","yellow","springgreen","royalblue"))
+sb_color <- factor(drive[(drive$d04 == 1),]$seatbelt)
+
+p10 <- ggplot(drive[(drive$d04 == 1),], aes(x = state.name, y = totfatrte, color=sb_color)) +
+        geom_point(aes(x = state.name, y = totfatrte, color=factor(seatbelt)), alpha = 0.7) +
+        scale_y_continuous(name = "total fatalities per 100,000 population") +
+        scale_x_discrete(name = "Year") +
+        ggtitle("Total fatalities per 100,000 population by state change 1980-2004") + 
+  theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+p10
+```
+
+
+#DELETE
+
+```{r}
+ggplot(drive[drive$state <= 10, ], aes(x=factor(state.name), y=totfatrte, fill=factor(seatbelt))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") + 
+    facet_wrap(~state, scale="free") 
+```
+
+
+```{r}
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(seatbelt))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+```
+
+
+
+# DELETE
+
+```{r}
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(bac08.binary))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(bac10.binary))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(gdl.binary))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(sl70plus.binary))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(sbprim))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(sbsecon))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+```
+
+
+# DELETE
+
+```{r}
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(bac08))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(bac10))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(gdl))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(sl70plus))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(sbprim))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+ggplot(drive, aes(x=factor(year), y=totfatrte, fill=factor(sbsecon))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+
+
+```
+
+
+
+# DELETE
+
+```{r}
+ boxplot_groups <- function(start_idx, end_idx) {
+   ggplot(drive[which(drive$state >= start_idx & drive$state <= end_idx), ], aes(x=factor(state.name), y=totfatrte, fill=factor(seatbelt))) + 
+    geom_boxplot() +
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "Year") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by seatbelt laws") + 
+    facet_wrap(~state, scale="free")
+}
+```
+
+
+```{r}
+boxplot_groups(1, 9)
+boxplot_groups(10, 18)
+boxplot_groups(19, 27)
+boxplot_groups(28, 36)
+boxplot_groups(37, 45)
+boxplot_groups(46, 52)
+```
+
+
+# DELETE
+
+```{r}
+#mean_annual_totfatrte = aggregate(drive[, "totfatrte"], list(drive$year), mean)
+ggplot(drive, aes(x=year, y=unem), line=factor(state)) +
+      geom_line(aes(group=state), colour=colfunc(1200)) + 
+      #geom_point(colour="#003366") +
+      labs(x="Year", y="Unemployment Rate 1980-2004")
+      theme(axis.text.x=element_text(angle=60, hjust=1))
+```
+
+
+
+# DELETE
+```{r}
+coplot(totfatrte ~ year|state, type="l", col = colfunc(48), data=drive) # Lines
+#coplot(totfatrte ~ year|state, type="b", data=drive) # Points and lines
+```
+
+# DELETE
+
+```{r}
+suppressWarnings(scatterplot(totfatrte ~ year|state, boxplots=FALSE, smooth=TRUE,
+                             reg.line=FALSE, data=drive, legend.columns=12,
+                             xlab="Year", ylab="Total Fatalities per 100k Population",
+                             main="Total Fatalities per 100k Pop by State (1980 - 2004"))
+```
+
+# DELETE
+
+```{r}
+suppressWarnings(plotmeans(totfatrte ~ state, main="Heterogeneity across States", data=drive,
+                           xlab="State", ylab="Total Fatalities per 100k Population", col=line_color1))
+```
+
+# DELETE
+
+```{r}
+suppressWarnings(plotmeans(totfatrte ~ year, main="Heterogeineity across Years", data=drive,
+                           xlab="Year", ylab="Total Fatalities per 100k Population", col=line_color1))
+```
+
+
+```{r}
+## summarySE function 
+## source: http://www.cookbook-r.com/Graphs/Plotting_means_and_error_bars_(ggplot2)/
+## Summarizes data.
+## Gives count, mean, standard deviation, standard error of the mean, and confidence interval (default 95%).
+##   data: a data frame.
+##   measurevar: the name of a column that contains the variable to be summariezed
+##   groupvars: a vector containing names of columns that contain grouping variables
+##   na.rm: a boolean that indicates whether to ignore NA's
+##   conf.interval: the percent range of the confidence interval (default is 95%)
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE) {
+    library(plyr)
+
+    # New version of length which can handle NA's: if na.rm==T, don't count them
+    length2 <- function (x, na.rm=FALSE) {
+        if (na.rm) sum(!is.na(x))
+        else       length(x)
+    }
+
+    # This does the summary. For each group's data frame, return a vector with
+    # N, mean, and sd
+    datac <- ddply(data, groupvars, .drop=.drop,
+      .fun = function(xx, col) {
+        c(N    = length2(xx[[col]], na.rm=na.rm),
+          mean = mean   (xx[[col]], na.rm=na.rm),
+          sd   = sd     (xx[[col]], na.rm=na.rm)
+        )
+      },
+      measurevar
+    )
+
+    # Rename the "mean" column    
+    datac <- rename(datac, c("mean" = measurevar))
+
+    datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+
+    # Confidence interval multiplier for standard error
+    # Calculate t-statistic for confidence interval: 
+    # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+
+    return(datac)
+}
+
+```
+
+
+```{r}
+# summarySE treats condition as though it were a between-subjects variable (see source)
+dfwc_between <- summarySE(data=drive, measurevar="totfatrte", groupvars="year", na.rm=FALSE, conf.interval=.95)
+dfwc_between
+
+ggplot(dfwc_between, aes(x=year, y=totfatrte, group=1)) +
+    geom_line(colour=line_color1) +
+    geom_errorbar(width=.1, aes(ymin=totfatrte-ci, ymax=totfatrte+ci), colour=line_color2) +
+    geom_point(shape=21, size=3, fill="#00336650", colour="#00336680") +
+    ggtitle("Heterogeneity Across Years")
+```
+
+
+
+```{r}
+# norm_hist(dfwc_between$se, br=10)
+```
+
+
+```{r}
+xyplot_groups <- function(start_idx, end_idx) {
+  xyplot(totfatrte ~ year | state.name, 
+       data = drive[which(drive$state >= start_idx & drive$state <= end_idx), ], 
+       aspect = "xy", type = c("g", "p", "r"),
+       index.cond = function(x, y) coef(lm(y ~ x))[2], 
+       alpha=c(1, 0.5, 0.5), 
+       title=levels(drive$state.name), as.table = TRUE,
+       ylab = "total fatalities per 100,000 population",
+       xlab = "Year",
+       par.settings=simpleTheme(col=line_color1, col.line="red"),
+       strip=strip.custom(factor.levels=unique(drive$state.name[which(drive$state >= start_idx & drive$state <= end_idx)]))
+       )
+}
+```
+
+```{r}
+xyplot_groups(1, 18)
+xyplot_groups(19, 36)
+xyplot_groups(37, 52)
+```
+
+Looking at a subset of the data where speed limits are over 70 miles per hour, the bivariate trellis plot shows there is a positive linear relationship between primary seatbelt laws and total fatalities per 100K miles that doesn't appear for observations where speed limits are not over 70 mph.
+
+```{r}
+explanatory_var <- c('bac08', 'bac10', 'perse', 'sbprim', 'sbsecon', 'sl70plus', 'gdl', 'perc14_24', 'unem', 'vehicmilespc')
+data_group <- drive[drive$sl70plus == 1, ]
+dependent_var <- data_group$totfatrte
+xyplot_groups_year(data_group, dependent_var, explanatory_var)
+
+explanatory_var <- c('bac08', 'bac10', 'perse', 'sbprim', 'sbsecon', 'sl70plus', 'gdl', 'perc14_24', 'unem', 'vehicmilespc')
+data_group <- drive[drive$sl70plus == 0, ]
+dependent_var <- data_group$totfatrte
+xyplot_groups_year(data_group, dependent_var, explanatory_var)
+```
+
+
+# DELETE
+
+```{r}
+explanatory_var <- c('bac08', 'bac10', 'perse', 'sbprim', 'sbsecon', 'sl70plus', 'gdl', 'perc14_24', 'unem', 'vehicmilespc')
+data_group <- drive[drive$state.name == 'Kentucky', ]
+dependent_var <- data_group$totfatrte
+xyplot_groups_year(data_group, dependent_var, explanatory_var)
+```
+
+
+
+
+
+
+### Question 2: Simple regression model of *totfatrte* 
+
+** Global Mean **
+```{r}
+mean(drive$totfatrte)
+```
+
+
+** Average of `totfatrte` for years `1980`-`2004` **
+```{r}
+annualMeans <- aggregate(drive$totfatrte, by = list(drive$year), mean)
+annualMeans$deviation_from_mean <- annualMeans$x - mean(drive$totfatrte)
+annualMeans
+```
+
+
+```{r}
+lm.1 <- lm(totfatrte ~ year, data = drive)
+lm.2 <- lm(totfatrte ~ as.factor(year), data = drive)
+stargazer(lm.1, lm.2, type = "text", summary = FALSE)
+```
+
+
+
+```{r}
+plot(c(1980:2004),lm.2$coefficients, col=line_color1)
+quick_fit <- lm(lm.2$coefficients~c(1980:2004))
+lines(c(1980:2004),fitted(quick_fit), col=line_color2)
+summary(quick_fit)
+```
+
+
+
+
+** Changes between 1980 and 2004 ** 
+
+We'll subset the data to show only the first panel (`1980`) and last panel (`2004`) and look at some changes in the explanatory variables over time.
+
+```{r}
+drive_1980 <- drive[drive$year == '1980',]
+drive_2004 <- drive[drive$year == '2004',]
+```
+
+
+One thing to notice is that the population distribution changes significantly. There are fewer 14-24 year olds in 2004 than in 1980.
+
+
+```{r}
+cbind('year','mean', 'std')[1, ]
+cbind('1980', mean(drive_1980$perc14_24), sd(drive_1980$perc14_24))[1, ]
+cbind('2004', mean(drive_2004$perc14_24), sd(drive_2004$perc14_24))[1, ]
+```
+
+
+```{r}
+norm_hist(drive_1980$perc14_24, 
+          xlabel='Percentage of Pop. 14-24', 
+          title='Distribution of Percentage of \nPopulation 14-24 Years Old \n1980',
+          drive_2004$perc14_24, 
+          xlabel2 ='Percentage of Pop. 14-24', 
+          title2='Distribution of Percentage of \nPopulation 14-24 Years Old \n2004')
+```
+
+
+As we saw earlier in the data grouped by indivdual states, there is also significant shifting in the amount of vehicle miles driven per capita, where the average goes from `7121` miles in `1980` to `10811` miles in `2004`. 
+
+```{r}
+cbind('year','mean', 'std')[1, ]
+cbind('1980', mean(drive_1980$vehicmilespc), sd(drive_1980$vehicmilespc))[1, ]
+cbind('2004', mean(drive_2004$vehicmilespc), sd(drive_2004$vehicmilespc))[1, ]
+```
+
+
+```{r}
+norm_hist(drive_1980$vehicmilespc, 
+          xlabel='Miles Driven Per Capita', 
+          title='Distribution of Miles \nDriven per capita 1980',
+          drive_2004$vehicmilespc, 
+          xlabel2 ='Miles Driven Per Capita', 
+          title2='Distribution of Miles \nDriven per capita 2004')
+```
+
+
+### Question 2
+
+##### How is the our dependent variable of interest *totfatrte* defined?
+
+Our dependent variable of interest is defined as the total number of fatalities per 100,000 population. 
+
+##### What is the average of this variable in each of the years in the time period covered in this dataset?
+
+```{r}
+mean(drive$totfatrte)
+sd(drive$totfatrte)
+aggregate(drive[, "totfatrte"], list(drive$year), mean)
+```
+
+
+
+```{r}
+mean_annual_totfatrte = aggregate(drive[, "totfatrte"], list(drive$year), mean)
+ggplot(mean_annual_totfatrte[2], aes(x=mean_annual_totfatrte[1], y=mean_annual_totfatrte[2])) +
+      geom_line(colour="#0072B2") + 
+      geom_point(colour="#003366") +
+      labs(x="Year", y="Average Total Fatalities per 100,000 Population", 
+           title="Average Total Fatalities per 100 Million Miles 1980-2004")
+      theme(axis.text.x=element_text(angle=60, hjust=1))
+```
+
+
+##### Estimate a very simple regression model of totfatrte on dummy variables for the years 1981 through 2004.
+
+```{r}
+# OLS without dummy variables
+lm.1 <- lm(totfatrte ~ year, data = drive)
+# OLS with dummy variables
+lm.2 <- lm(totfatrte ~ as.factor(year), data = drive, x=TRUE)
+```
+
+
+```{r}
+summary(lm.2)
+```
+
+
+```{r}
+#stargazer(lm.1, lm.2, type = "text", summary = FALSE)
+```
+
+
+
+```{r}
+plot.ts(lm.2$residuals, col=line_color1, type='l')
+```
+
+
+
+##### What does this model explain?
+
+It shows a serial dependency of the dependent variable (`totfatrte`) on `t`. We can see that there is a statistically significant negative slope on each dummy coefficient which represents a decline in the number of total fatalities per 100k population on average nationally. We can also see that the R^2 value is very low for the model, and that the model does not explain the variability of the data very well. We should use a model that model the time dependency more explicitly.
+
+
+##### Describe what you find in this model. Did driving become safer over this period? Please provide a detailed explanation.
+
+Judging by the ratio of fatalities, driving did become safer on aggregate.  The data show that there were approximately 25 fatalities for every 100,000 people in 1980, and over time, the amount of fatalities was reduced to approximately 17 in 2004. 
+
+
+### Question 3
+
+##### Expand model to include *bac08, bac10, perse, sbprim, sbsecon, sl70plus, gdl, perc14_24, unem, vehicmilespc*
+
+Recall that during our EDA, we created binary versions of all categorical variables that represented partial panel periods. For comparison we will create two models. One that uses the binary representations, and one that does not.
+
+```{r}
+# Model without binary variables
+lm.3 <- lm(totfatrte ~ bac08 + bac10 + perse + 
+             sbprim + sbsecon + sl70plus + gdl + 
+             perc14_24 + unem + vehicmilespc + 
+             as.factor(year), data = drive, x=TRUE)
+```
+
+
+```{r}
+# Model with binary variables
+lm.3.binary <- lm(totfatrte ~ bac08.binary + bac10.binary + perse.binary + 
+             sbprim + sbsecon + sl70plus.binary + gdl.binary + 
+             perc14_24 + unem + vehicmilespc + 
+             as.factor(year), data = drive, x=TRUE)
+```
+
+
+```{r}
+# Model with binary variables
+lm.4 <- lm(totfatrte ~ bac08.binary + bac10.binary + perse.binary + 
+             sbprim + sbsecon + sl70plus.binary + gdl.binary + 
+             log10(perc14_24) + log10(unem) + log10(vehicmilespc) + 
+             as.factor(year), data = drive, x=TRUE)
+```
+
+
+```{r}
+# Coefficient test with robust standard errors
+#summary(lm.3)
+coeftest(lm.3, vcov. = vcovHC(lm.3))[1:11,]
+```
+
+```{r}
+# Coefficient test with robust standard errors
+# summary(lm.3.binary)
+coeftest(lm.3.binary, vcov. = vcovHC(lm.3.binary))[1:11,]
+```
+
+
+```{r}
+# Coefficient test with robust standard errors
+# summary(lm.3.binary)
+coeftest(lm.4, vcov. = vcovHC(lm.4))[1:11,]
+```
+
+
+The models perform similarly in terms of R^2 and F-statistics, but the model that has binarized categorical features has slightly smaller coefficients and standard errors.
+
+```{r}
+stargazer(lm.3, lm.3.binary, lm.4, type = "text", summary = FALSE)
+```
+
+
+##### Explain carefully your rationale, which should be based on your EDA, behind any transformation you made.
+
+As we have discussed, our model `lm.3.binarized` has used binarized categorical features which changes the effects on some of the variables. The log transformation
+
+##### If no transformation is made, explain why transformation is not needed.
+
+N/A
+
+##### How are the variables bac8 and bac10 defined?
+
+`bac08`: blood alcohol limit .08
+`bac10`: blood alcohol limit .10
+
+##### Interpret the coefficients on `bac8` and `bac10`.
+
+In our preferred model `lm.3.binary`, the coefficients are all negative and indicate that states with laws where the blood alcohol limit for driving is `0.08` see a decrease in total fatalities per 100,000 people of `-2.126`. For states where the blood alcohol limit is `0.10`, we expect a decrease of `-1.118`.
+
+
+##### Do per se laws have a negative effect on the fatality rate?
+
+Yes, in our models, per se laws have a negative effect at the `0.05` level.
+
+##### What about having a primary seat belt law? (Note that if a law was enacted sometime within a year the fraction of the year is recorded in place of the zero-one indicator.)
+
+The primary seatbelt law has a very small negative coefficient (`-0.071`) in our model, but does not have a significant effect. Additionally, the standard error (`0.493`) indicates that the coefficient could be positive or negative and we can not be confident that the law has a negative effect on the fatality rate.
+
+
+
+
+#Question 4
+
+## Reestimate the model from *Exercise 3* using a fixed effects (at the state level) model.
+
+Unobserved Effect Model (Fixed Effect)
+
+General form:
+
+$$  y_{it} = \beta_{0} + \delta_{0}d2_{t} + \beta_{1}x_{it} + a_{i} + \epsilon_{it} $$
+
+Fixed model for `totfatrte`:
+
+$$  totfatrte_{it} = \beta_{0} + (\delta_{0}d81_{t} + \delta_{0}d82_{t} + ... + \delta_{0}d04_{t})  
++ (\beta_{1}bac08_{it} + \beta_{1}bac10_{it} + \beta_{1}perse_{it} + \beta_{1}sbprim_{it} +
+\beta_{1}sbsecon_{it} + \beta_{1}sl70plus_{it} + \beta_{1}gdl_{it} + \beta_{1}perc14\_24_{it} +
+\beta_{1}unem_{it} + \beta_{1}vehicmilespc_{it} + a_{i} + \epsilon_{it} $$
+
+
+
+```{r}
+# Use plm to transform data into suitable format for estimation with plm function
+drive.panel <- plm.data(drive, c("state", "year"))
+str(drive.panel)
+
+
+```
+
+
+
+
+# DELETE
+
+```{r}
+p <- ggplot(data = drive.panel, aes(x = gdl, fill=factor(gdl))) + 
+  geom_histogram(binwidth = .25)
+p + facet_wrap(~year, scales = "free_y") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+```
+
+
+# DELETE
+
+```{r}
+p <- ggplot(data = drive.panel, aes(x = sl70plus, fill=factor(sl70plus))) + 
+  geom_histogram(binwidth = .25)
+p + facet_wrap(~year, scales = "free_y") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+```
+
+
+# DELETE
+
+```{r}
+p <- ggplot(data = drive.panel[drive.panel$year == 1996, ], aes(x = sl70plus, fill=factor(sl70plus))) + 
+  geom_histogram(binwidth = .25)
+p + facet_wrap(~year, scales = "free_y") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+```
+
+# DELETE
+
+```{r}
+p <- ggplot(data = drive.panel, aes(x = bac10, fill=factor(bac10))) + 
+  geom_histogram(binwidth = .25, show.legend = TRUE)
+p + facet_wrap(~year, scales = "free_y")
+```
+
+
+# DELETE
+
+```{r}
+factor_bins <- factor(cut(drive.panel$bac10, c(0, 0.25, 0.5, 0.75, 1.0), include.lowest=TRUE))
+p <- ggplot(data = drive.panel, aes(x = bac10, fill=factor_bins)) + geom_histogram(binwidth = .25)
+p + facet_wrap(~year, scales = "free_y")
+```
+
+# DELETE
+
+```{r}
+ggplot(drive.panel, aes(x=bac08.binary, y=totfatrte, fill=factor(bac08.binary))) + 
+    geom_boxplot()+
+    scale_y_continuous(name = "total fatalities per 100,000 population") +
+    scale_x_discrete(name = "BAC 0.8") +
+    ggtitle("Total fatalities per 100,000 population \nFactored by BAC 0.8") +
+    theme(axis.text.x=element_text(angle=90, vjust = 0.5, hjust=1))
+```
+
+
+** Fixed Effects Model **
+
+```{r}
+fe.1 <- plm(totfatrte ~ bac08.binary + bac10.binary + perse.binary + 
+             sbprim + sbsecon + sl70plus.binary + gdl.binary + 
+             perc14_24 + unem + vehicmilespc +
+              d80 + d81 + d82 + d83 + d84 + d85 + d86 + d87 + d88 + d89 + 
+              d90 + d91 + d92 + d93 + d94 + d00 + d01 + d02 + d03 + d04, 
+            data = drive.panel, model='within')
+```
+
+
+
+** Pooled OLS Model **
+
+```{r}
+pool.1 <- plm(totfatrte ~ bac08.binary + bac10.binary + perse.binary + 
+             sbprim + sbsecon + sl70plus.binary + gdl.binary + 
+             perc14_24 + unem + vehicmilespc +
+
+                  d80 + d81 + d82 + d83 + d84 + d85 + d86 + d87 + d88 + d89 + 
+               d90 + d91 + d92 + d93 + d94 + d00 + d01 + d02 + d03 + d04, 
+            data = drive.panel, model='pooling')
+```
+
+
+
+** Random Effects Model **
+
+```{r}
+re.1 <- plm(totfatrte ~ bac08.binary + bac10.binary + perse.binary + 
+             sbprim + sbsecon + sl70plus.binary + gdl.binary + 
+             perc14_24 + unem + vehicmilespc +
+              d80 + d81 + d82 + d83 + d84 + d85 + d86 + d87 + d88 + d89 + 
+              d90 + d91 + d92 + d93 + d94 + d00 + d01 + d02 + d03 + d04, 
+            data = drive.panel, model='random')
+```
+
+
+
+** Robust Coefficient T-Testing **
+
+Note on Coeftest from documentation:
+
+*All types assume no intragroup (serial) correlation between errors and allow for heteroskedasticity across groups (time periods). As for the error covariance matrix of every single group of observations:*
+
+  *- "white1": allows for general heteroskedasticity but no serial (cross-sectional) correlation*
+  *- "white2": is "white1" restricted to a common variance inside every group (time period)*
+  *- "arellano": allows a fully general structure w.r.t. heteroskedasticity and serial (cross-sectional) correlation.*
+  
+More on White test in Wooldridge (pp. 279)
+  
+And from [Journal of Statistical Software (page 4)] (https://www.jstatsoft.org/article/view/v011i10/v11i10.pdf):
+
+  *- HC0 is justified by asymptotic arguments.*
+  *- HC1, HC2 and HC3 improve the performance in small samples*
+  *- HC3 provides the best performance in small samples as it gives less weight to influential observations*
+  *- HC4 further improves small sample performance, especially in the presence of influential observations. *
+
+
+```{r}
+#summary(fe.1)
+coeftest(fe.1, vcovHC(fe.1, method="arellano", group='year', type="HC3"))
+```
+
+
+```{r}
+coeftest(re.1, plm::vcovHC(pool.1, method="arellano", group='year', type="HC3"))
+```
+
+
+
+
+```{r}
+#summary(pool.1)
+coeftest(pool.1, plm::vcovHC(pool.1, method="arellano", type="HC3"))
+```
+
+
+Looking at the correlation between explanatory variables, 
+
+```{r}
+explanatory_var <- c('bac08.binary', 'bac10.binary', 'perse.binary', 'sbprim', 'sbsecon', 'sl70plus.binary', 'gdl.binary', 'perc14_24', 'unem', 'vehicmilespc')
+cor(drive.panel[,explanatory_var],use = "pairwise.complete.obs")
+```
+
+The residuals for our models:
+
+```{r}
+plot(fe.1$residuals, col=line_color1, type='l')
+plot(pool.1$residuals, col=line_color1, type='l')
+plot(re.1$residuals, col=line_color1, type='l')
+```
+
+
+Comparing our models, the R^2 and F-statistics are slightly better with the fixed effects model.
+
+```{r}
+stargazer(lm.3.binary, fe.1, pool.1, re.1,  type = "text", summary = FALSE)
+```
+
+** Test of Poolability **
+
+One way to test the coefficients of a panel model for dependency across observations is to use `pooltest()` to see whether slope coefficients would be constant over time.
+
+$$ H_{0} =  \text{Slope coefficients are constant} $$
+$$ H_{a} =  \text{Slope coefficients are not constant} $$
+
+```{r}
+pooltest(totfatrte ~ bac08.binary + bac10.binary + perse.binary + 
+             sbprim + sbsecon + sl70plus.binary + gdl.binary + 
+             perc14_24 + unem + vehicmilespc, 
+            data = drive.panel, model='within')
+pooltest(totfatrte ~ bac08.binary + bac10.binary + perse.binary + 
+             sbprim + sbsecon + sl70plus.binary + gdl.binary + 
+             perc14_24 + unem + vehicmilespc, 
+            data = drive.panel, model='pooling')
+```
+
+The pool test indicates a significant result, indicating that the slope coefficients are not constant.
+
+
+
+** Test for Serial Correlation ** 
+
+Applying the Breusch-Godfrey Test to our fixed effect and pooled models, we obtain a significant result, indicating that we should reject the null hypothesis of no serial correlation.
+
+```{r}
+pbgtest(fe.1, order=2)
+pbgtest(pool.1, order=2)
+#pbgtest(re.1, order=2)
+```
+
+
+# DELETE
+** Other models **
+
+First Differenced Model
+```{r}
+fd.1 <- plm(totfatrte ~ bac08 + bac10 + perse + 
+             sbprim + sbsecon + sl70plus + gdl + 
+             perc14_24 + unem + vehicmilespc, 
+             data = drive, model='fd')
+#summary(fd.1)
+```
+
+
+# Further discussion?
+
+We can use a mixed effects model to account for heteroskedacicity in our state groups.
+
+Mixed Effects Model
+```{r}
+library(lme4)
+lme.1 <- lmer(totfatrte ~ (1|state) + bac08 + bac10 + perse + 
+             sbprim + sbsecon + sl70plus + gdl + 
+             perc14_24 + unem + vehicmilespc, 
+             data = drive, REML=TRUE)
+```
+
+```{r}
+summary(lme.1)
+```
+
+
+
+##### How do the coefficients on bac08, bac10, perse, and sbprim compare with the pooled OLS estimates?
+
+```{r}
+fe.1$coefficients
+pool.1$coefficients
+```
+
+
+##### Which set of estimates do you think is more reliable?
+
+Fixed effects appear to be more reliable.
+
+
+##### What assumptions are needed in each of these models?
+
+
+
+##### Are these assumptions reasonable in the current context?
+
+
+### Question 5
+
+##### Would you perfer to use a random effects model instead of the fixed effects model you build in Exercise 4? Why? Why not?
+
+The random effects model includes all of the same assumptions as the fixed effects model, but includes the additional requirement that the unobserved heterogeneity term (a_i) is independent of all explanatory variables for all time periods.
+
+$$  Cov(x_{itj}, a{i}) = 0, \text{   } t = 1,2,...,T; j = 1,2,...,k $$
+
+So the fixed effects estimator is preferred when there is correlation between a_i and the explanatory variables, but cannot be used when the key explanatory variable is constant over time, and suggests a random effects model may be better.
+
+One way of testing which model to use is to perform a Hausman test under the full set of random effects assumptions, and use the random effects model unless the test rejects the hypothesis that these assumptions are valid.
+
+
+
+** Hausman Test **
+
+The results of the Hausman test indicate a significant p-value, and suggests we should use the fixed effects model over the random effects model for our panel data. 
+
+```{r}
+phtest(fe.1, re.1)
+```
+
+
+
+
+
+
+### Question 6
+
+##### Using the FE estimates, what is the estimated effect on totfatrte?
+
+
+
+
+
+
+### Question 7
+
+##### If there is serial correlation or heteroskedasticity in the idiosyncratic errors of the model, what would be the consequences on the coefficient estimates and their standard errors?
+
+
+
+
+
+
+# DELETE
+
+### Mapping
+https://eriqande.github.io/rep-res-web/lectures/making-maps-with-R.html
+
+```{r}
+# library(ggplot2)
+# library(ggmap)
+# library(maps)
+# library(mapdata)
+# states <- map_data("state")
+# dim(states)
+# ggplot(data = states) + 
+#   geom_polygon(aes(x = long, y = lat, fill = region, group = group), color = "white") + 
+#   coord_fixed(1.3) +
+#   guides(fill=FALSE)  # do this to leave off the color legend
+
+```
+
+
+# Mapping 2
+https://cran.r-project.org/web/packages/fiftystater/vignettes/fiftystater.html
+
+```{r}
+# library(maps)
+# library(ggplot2)
+# library(fiftystater)
+# 
+# data("fifty_states") # this line is optional due to lazy data loading
+# 
+# #crimes <- data.frame(state = tolower(rownames(USArrests)), USArrests)
+# 
+# # map_id creates the aesthetic mapping to the state name column in your data
+# p <- ggplot(drive, aes(map_id = states)) + 
+#   # map points to the fifty_states shape data
+#   geom_map(aes(fill = totfatrte), map = states) + 
+#   expand_limits(x = states$long, y = states$lat) +
+#   coord_map() +
+#   scale_x_continuous(breaks = NULL) + 
+#   scale_y_continuous(breaks = NULL) +
+#   labs(x = "", y = "") +
+#   theme(legend.position = "bottom", 
+#         panel.background = element_blank())
+# 
+# p
+# # add border boxes to AK/HI
+# p + fifty_states_inset_boxes() 
+```
+
+```{r}
+# library(maps)
+# library(ggplot2)
+# library(fiftystater)
+# 
+# data("fifty_states") # this line is optional due to lazy data loading
+# 
+# crimes <- data.frame(state = tolower(rownames(USArrests)), USArrests)
+# 
+# # map_id creates the aesthetic mapping to the state name column in your data
+# p <- ggplot(crimes, aes(map_id = state)) + 
+#   # map points to the fifty_states shape data
+#   geom_map(aes(fill = Assault), map = fifty_states) + 
+#   expand_limits(x = fifty_states$long, y = fifty_states$lat) +
+#   coord_map() +
+#   scale_x_continuous(breaks = NULL) + 
+#   scale_y_continuous(breaks = NULL) +
+#   labs(x = "", y = "") +
+#   theme(legend.position = "bottom", 
+#         panel.background = element_blank())
+# 
+# p
+# # add border boxes to AK/HI
+# p + fifty_states_inset_boxes() 
+```
+
+
+
+```{r}
+# # Map a second variable to each state's fill color with colorplaner
+# library(colorplaner)
+# p + aes(fill2 = UrbanPop) + scale_fill_colorplane() +
+#   theme(legend.position = "right")
+```
+
+
+# Mapping 3
+http://www.computerworld.com/article/3175623/data-analytics/mapping-in-r-just-got-a-whole-lot-easier.html

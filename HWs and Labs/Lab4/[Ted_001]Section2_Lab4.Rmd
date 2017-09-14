@@ -1,0 +1,169 @@
+---
+title: "Statistical Methods for Discrete Response, Time Series, and Panel Data (W271): Lab 4"
+author: "Ted Pham"
+date: "August 17, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning = F, error = F, message = F}
+#rm(list = ls())
+library(lme4)
+library(stargazer)
+library(lattice)
+library(arm)
+library(Hmisc)
+library(psych)
+line_color1 <- rgb(165/255, 203/255, 223/255) 
+line_color2 <- rgb(199/255, 37/255, 4/255, 0.5) 
+line_color3 <- rgb(200/255, 200/255, 200/255, 0.5) 
+line_color4 <- rgb(133/255, 161/255, 198/255, 0.25)
+```
+
+```{r}
+norm_hist <- function(data.ts, data2.ts=NULL, br=30) {
+  if (!is.null(data2.ts)){
+    par(mfrow=c(1, 2))
+  }
+  h <- hist(data.ts, col=rgb(6/255, 57/255, 126/255, 0.4), lwd = 2, breaks = br)
+  xfit <- seq(min(data.ts), max(data.ts), length = 40) 
+  yfit <- dnorm(xfit, mean = mean(data.ts), sd = sd(data.ts)) 
+  yfit <- yfit * diff(h$mids[1:2]) * length(data.ts) 
+  lines(xfit, yfit, col = rgb(199/255, 37/255, 4/255, 0.5), lwd = 2)
+  
+  if (!is.null(data2.ts)){
+    h <- hist(data2.ts, col=rgb(6/255, 57/255, 126/255, 0.4), breaks=br)
+    xfit <- seq(min(data2.ts), max(data2.ts), length = 40)
+    yfit <- dnorm(xfit, mean = mean(data2.ts), sd = sd(data2.ts))
+    yfit <- yfit * diff(h$mids[1:2]) * length(data2.ts)
+
+    lines(xfit, yfit, col = rgb(199/255, 37/255, 4/255, 0.5), lwd = 2)
+  }
+}
+```
+
+
+```{r}
+#path <- "D:/CloudStation/W271 Time Series/HWs and Labs/Lab4"
+#setwd(path)
+load("driving.Rdata")
+drive <- data
+```
+
+## Dataset Overview
+
+### Question 1: EDA
+
+```{r}
+# View(drive)
+str(drive)
+```
+
+
+** Check for missing values  **
+
+There are no missing values.
+```{r}
+sapply(drive, function(x) sum(is.na(x)))
+```
+
+
+
+
+```{r}
+head(drive, 10)
+```
+
+```{r}
+tail(drive, 10)
+```
+
+
+```{r}
+norm_hist(drive$totfatrte, drive$totfat)
+```
+
+
+```{r}
+boxplot(drive$totfatrte ~ drive$year, col=c(line_color1, line_color2))
+```
+
+
+
+```{r}
+xyplot_groups <- function(start_idx, end_idx) {
+  xyplot(totfatrte ~ year | state, 
+       data = drive[which(drive$state >= start_idx & drive$state <= end_idx), ], 
+       aspect = "xy", type = c("g", "p", "r"),
+       index.cond = function(x, y) coef(lm(y ~ x))[2], 
+       alpha=c(1, 0.5, 0.5), 
+       title=drive$state, as.table = TRUE,
+       ylab = "total fatalities per 100,000 population",
+       xlab = "Year",
+       par.settings=simpleTheme(col=line_color1, col.line="red")
+       )
+}
+```
+
+```{r}
+xyplot_groups(1, 18)
+xyplot_groups(19, 36)
+xyplot_groups(37, 52)
+```
+
+
+### Question 2: Simple regression model of *totfatrte* 
+
+** Global Mean **
+```{r}
+mean(drive$totfatrte)
+```
+
+
+** Average of `totfatrte` for years `1980`-`2004` **
+```{r}
+annualMeans <- aggregate(drive$totfatrte, by = list(drive$year), mean)
+annualMeans$deviation_from_mean <- annualMeans$x - mean(drive$totfatrte)
+annualMeans
+```
+
+
+```{r}
+lm.1 <- lm(totfatrte ~ year, data = drive)
+lm.2 <- lm(totfatrte ~ as.factor(year), data = drive)
+stargazer(lm.1, lm.2, type = "text", summary = FALSE)
+```
+
+
+```{r}
+plot(lm.2$coefficients[2:24])
+
+```
+
+```{r}
+names(drive)
+```
+```{r}
+drive$state
+```
+
+
+
+
+
+
+
+
+
+
+```{r}
+drive$bac08
+```
+
+
+
